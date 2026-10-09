@@ -15,8 +15,8 @@ android {
         applicationId = "dev.local.record"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }
@@ -46,6 +46,7 @@ dependencies {
     implementation("androidx.navigation3:navigation3-ui:1.0.0")
     implementation("androidx.compose.material3.adaptive:adaptive-navigation3:1.3.0-alpha02")
     implementation("androidx.room:room-runtime:2.8.4")
+    implementation("androidx.datastore:datastore-core:1.2.0")
     implementation("com.google.dagger:hilt-android:2.57.2")
     ksp("com.google.dagger:hilt-compiler:2.57.2")
     implementation("androidx.room:room-ktx:2.8.4")
@@ -64,6 +65,8 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     androidTestImplementation("androidx.room:room-testing:2.8.4")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    androidTestImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
     androidTestImplementation("com.google.dagger:hilt-android-testing:2.57.2")
     kspAndroidTest("com.google.dagger:hilt-compiler:2.57.2")
 }

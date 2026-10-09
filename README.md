@@ -2,7 +2,9 @@
 
 纯原生 Android 本地录音原型：Kotlin、Jetpack Compose、Material 3 Expressive、Room Event Sourcing。
 
-支持桌面小组件自动开始、麦克风前台服务、暂停／继续、M4A 保存、录音库、播放和进度拖动。按实际窗口与折叠特征展示单栏／列表详情双栏；Activity 重建不会结束服务录音。暂不接入 AI。
+支持桌面小组件自动开始、麦克风前台服务、暂停／继续、M4A 保存、按日期分组的录音库、播放和进度拖动。按实际窗口与折叠特征展示单栏／列表详情双栏；Activity 重建不会结束服务录音。
+
+0.2.0 新增设置、多 provider、DeepSeek Responses 预设、自定义 Responses／OpenAI 兼容接口、独立语音模型和豆包语音配置、提示词、主题及无密钥 JSON 导入导出。Keystore 加密保护凭据。支持主动查询模型列表和发送固定文字测试文本模型；实际录音转写、标题、总结、记忆任务尚未接通，保存配置不会自动上传。使用说明见 [UI 与 AI 配置交付](docs/ui-ai-configuration-delivery.md)。
 
 ## 构建
 
@@ -32,6 +34,7 @@ APK：`app/build/outputs/apk/debug/app-debug.apk`。
 | Room / KSP | 2.8.4 / 2.2.21-2.0.4 |
 | Hilt | 2.57.2 |
 | Media3 | 1.9.0 |
+| DataStore | 1.2.0，配置与凭据以 AES-GCM 加密同事务保存 |
 
 Material 3 1.4 稳定版将所用 Expressive 主题 API 标为 internal，最新稳定 Adaptive 1.3 要求 API 37 / AGP 9.1。本阶段保留 API 36 工具链，固定兼容的实验库版本，不使用 Grid / FlexBox 等新的实验布局 API。实际兼容性以 APK 构建和仪器测试验证。
 
@@ -43,4 +46,4 @@ Windows 若仅系统代理可用，Java 不一定自动采用该设置。按本�
 
 事件追加、唯一幂等键、聚合版本检查、投影及检查点更新在同一 Room 事务内完成。`RecordingRepository.rebuild()` 仅重建投影；纯 reducer 不持有麦克风、网络、文件或调度接口。音频放在私有文件目录，事件只引用文件名。
 
-详见 [测试与验收](docs/testing.md)、[复用评估](docs/recording-reuse-evaluation.md)、[事件架构](docs/architecture/event-sourcing.md)。
+详见 [测试与验收](docs/testing.md)、[UI 与 AI 配置交付](docs/ui-ai-configuration-delivery.md)、[复用评估](docs/recording-reuse-evaluation.md)、[事件架构](docs/architecture/event-sourcing.md)。

@@ -21,9 +21,11 @@ import dagger.hilt.android.AndroidEntryPoint
 import dev.local.record.audio.RecordingService
 import dev.local.record.audio.SessionPhase
 import dev.local.record.audio.SessionState
+import dev.local.record.settings.AppAppearance
 import dev.local.record.ui.LibraryViewModel
 import dev.local.record.ui.RecordScreen
 import dev.local.record.ui.RecordTheme
+import dev.local.record.ui.SettingsViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -55,6 +57,7 @@ class MainActivity : ComponentActivity() {
         )
         enableEdgeToEdge()
         val model = ViewModelProvider(this, LibraryViewModel.Factory(applicationContext, graph))[LibraryViewModel::class.java]
+        val settingsModel = ViewModelProvider(this, SettingsViewModel.Factory(graph.settingsRepository))[SettingsViewModel::class.java]
         setContent {
             val recordings by model.recordings.collectAsStateWithLifecycle()
             val session by model.session.collectAsStateWithLifecycle()
@@ -62,7 +65,11 @@ class MainActivity : ComponentActivity() {
             val ready by model.ready.collectAsStateWithLifecycle()
             val problem by model.problem.collectAsStateWithLifecycle()
             val notify by notificationsAllowed.collectAsStateWithLifecycle()
-            RecordTheme {
+            val settingsState by settingsModel.state.collectAsStateWithLifecycle()
+            RecordTheme(
+                appearance = settingsState.configuration?.appearance ?: AppAppearance.SYSTEM,
+                dynamicColors = settingsState.configuration?.dynamicColors == true
+            ) {
                 RecordScreen(
                     recordings, session, playback, ready, problem, notify,
                     onStart = {
@@ -72,7 +79,9 @@ class MainActivity : ComponentActivity() {
                     onPause = { send(RecordingService.PAUSE) },
                     onStop = { send(RecordingService.STOP) },
                     onPlay = model::play, onSeek = model::seek,
-                    onNotifications = ::requestNotifications
+                    onNotifications = ::requestNotifications,
+                    settingsState = settingsState,
+                    settingsModel = settingsModel
                 )
             }
         }

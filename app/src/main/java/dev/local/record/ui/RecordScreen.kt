@@ -37,6 +37,7 @@ import androidx.compose.material3.adaptive.layout.calculatePaneScaffoldDirective
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +59,7 @@ import dev.local.record.audio.SessionState
 import dev.local.record.audio.formatDuration
 import dev.local.record.domain.Recording
 import dev.local.record.domain.RecordingStatus
+import dev.local.record.settings.AiCapability
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -68,6 +70,15 @@ data object Library : NavKey
 
 @Serializable
 data class Detail(val id: String) : NavKey
+
+@Serializable
+data object SettingsPage : NavKey
+
+@Serializable
+data class ConnectionPage(val id: String?) : NavKey
+
+@Serializable
+data class CapabilityPage(val capability: AiCapability) : NavKey
 
 @OptIn(androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi::class)
 @Composable
@@ -83,7 +94,9 @@ fun RecordScreen(
     onStop: () -> Unit,
     onPlay: (Recording) -> Unit,
     onSeek: (Long) -> Unit,
-    onNotifications: () -> Unit
+    onNotifications: () -> Unit,
+    settingsState: SettingsUiState = SettingsUiState(),
+    settingsModel: SettingsViewModel? = null
 ) {
     val backStack = rememberNavBackStack(Library)
     val windowInfo = currentWindowAdaptiveInfo()
@@ -107,6 +120,7 @@ fun RecordScreen(
                     LibraryPane(
                         recordings, session, ready, problem, notificationsAllowed,
                         onStart, onPause, onStop, onNotifications,
+                        onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
                         onSelect = { id ->
                             while (backStack.size > 1) backStack.removeLastOrNull()
                             backStack.add(Detail(id))
@@ -122,8 +136,71 @@ fun RecordScreen(
                         onBack = { if (backStack.size > 1) backStack.removeLastOrNull() },
                         onPlay = onPlay,
                         onSeek = onSeek,
-                        onStop = onStop
+                        onStop = onStop,
+                        onSettings = settingsModel?.let { { backStack.add(SettingsPage) } }
                     )
+                }
+                entry<SettingsPage> {
+                    settingsModel?.let { model ->
+                        SettingsFrame("设置", settingsState, session, false, { backStack.removeLastOrNull() }, null, onPause, onStop) {
+                            SettingsHome(
+                                settingsState,
+                                model,
+                                onConnection = { id ->
+                                    model.editConnection(id)
+                                    backStack.add(ConnectionPage(id))
+                                },
+                                onCapability = { capability ->
+                                    model.editBinding(capability)
+                                    backStack.add(CapabilityPage(capability))
+                                }
+                            )
+                        }
+                    }
+                }
+                entry<ConnectionPage> { page ->
+                    settingsModel?.let { model ->
+                        LaunchedEffect(page, settingsState.configuration != null) {
+                            if (settingsState.configuration != null && settingsState.connectionDraft == null) model.editConnection(page.id)
+                        }
+                        val back = {
+                            model.discardDraft()
+                            backStack.removeLastOrNull()
+                            Unit
+                        }
+                        SettingsFrame(
+                            "连接",
+                            settingsState,
+                            session,
+                            settingsState.connectionDraft?.dirty == true,
+                            back,
+                            { model.saveConnection { backStack.removeLastOrNull() } },
+                            onPause,
+                            onStop
+                        ) { ConnectionEditor(settingsState, model) { backStack.removeLastOrNull() } }
+                    }
+                }
+                entry<CapabilityPage> { page ->
+                    settingsModel?.let { model ->
+                        LaunchedEffect(page, settingsState.configuration != null) {
+                            if (settingsState.configuration != null && settingsState.bindingDraft == null) model.editBinding(page.capability)
+                        }
+                        val back = {
+                            model.discardDraft()
+                            backStack.removeLastOrNull()
+                            Unit
+                        }
+                        SettingsFrame(
+                            "能力配置",
+                            settingsState,
+                            session,
+                            settingsState.bindingDirty,
+                            back,
+                            { model.saveBinding { backStack.removeLastOrNull() } },
+                            onPause,
+                            onStop
+                        ) { CapabilityEditor(settingsState, model) }
+                    }
                 }
             }
         )
@@ -141,6 +218,7 @@ private fun LibraryPane(
     onPause: () -> Unit,
     onStop: () -> Unit,
     onNotifications: () -> Unit,
+    onSettings: (() -> Unit)?,
     onSelect: (String) -> Unit
 ) {
     val scroll = rememberLazyListState()
@@ -152,7 +230,10 @@ private fun LibraryPane(
     ) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("随声记", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("随声记", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    onSettings?.let { TextButton(onClick = it, modifier = Modifier.testTag("open-settings")) { Text("设置") } }
+                }
                 Text("留住此刻的想法", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -175,14 +256,17 @@ private fun LibraryPane(
                 )
             }
         }
-        items(recordings, key = { it.id }) { recording ->
-            Column {
-                ListItem(
-                    headlineContent = { Text(recordingTitle(recording), maxLines = 2) },
-                    supportingContent = { Text("${formatDuration(recording.durationMs)} · ${statusLabel(recording.status)}") },
-                    modifier = Modifier.clickable { onSelect(recording.id) }.testTag("recording-${recording.id}")
-                )
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        recordings.groupBy(::recordingDate).forEach { (date, entries) ->
+            item(key = "date-$date") { Text(date, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            items(entries, key = { it.id }) { recording ->
+                Column {
+                    ListItem(
+                        headlineContent = { Text(recordingTitle(recording), maxLines = 2) },
+                        supportingContent = { Text("${formatDuration(recording.durationMs)} · ${statusLabel(recording.status)}") },
+                        modifier = Modifier.clickable { onSelect(recording.id) }.testTag("recording-${recording.id}")
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                }
             }
         }
         item { Text("音频保存在本机 · M4A", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -194,14 +278,7 @@ fun RecordingControls(session: SessionState, ready: Boolean, onStart: () -> Unit
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
         Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
-                when (session.phase) {
-                    SessionPhase.IDLE -> "随时开始"
-                    SessionPhase.STARTING -> "正在打开麦克风…"
-                    SessionPhase.RECORDING -> "正在录音"
-                    SessionPhase.PAUSED -> "已暂停"
-                    SessionPhase.SAVING -> "正在保存…"
-                    SessionPhase.ERROR -> "需要留意"
-                },
+                sessionLabel(session.phase),
                 style = MaterialTheme.typography.titleMedium
             )
             if (session.active) {
@@ -248,7 +325,8 @@ private fun DetailPane(
     onBack: () -> Unit,
     onPlay: (Recording) -> Unit,
     onSeek: (Long) -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onSettings: (() -> Unit)?
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp).testTag("recording-detail"),
@@ -289,12 +367,22 @@ private fun DetailPane(
         HorizontalDivider()
         Text("原始音频", style = MaterialTheme.typography.titleMedium)
         Text("M4A · AAC · 单声道\n保存在应用私有存储中", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (onSettings != null) {
+            HorizontalDivider()
+            Text("转写与整理", style = MaterialTheme.typography.titleMedium)
+            Text("原始录音已保留。可先配置转写、标题和总结使用的服务；AI 任务将在后续版本接通。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = onSettings) { Text("配置 AI 服务") }
+        }
     }
 }
 
 fun recordingTitle(recording: Recording): String = runCatching {
     DateTimeFormatter.ofPattern("MM月dd日 HH:mm:ss").withZone(ZoneId.of(recording.zone)).format(Instant.ofEpochMilli(recording.startedAt))
 }.getOrDefault("录音")
+
+private fun recordingDate(recording: Recording): String = runCatching {
+    DateTimeFormatter.ofPattern("yyyy年MM月dd日").withZone(ZoneId.of(recording.zone)).format(Instant.ofEpochMilli(recording.startedAt))
+}.getOrDefault("其他日期")
 
 fun statusLabel(status: RecordingStatus) = when (status) {
     RecordingStatus.REQUESTED -> "启动请求"
@@ -303,6 +391,15 @@ fun statusLabel(status: RecordingStatus) = when (status) {
     RecordingStatus.SAVED -> "已保存"
     RecordingStatus.INTERRUPTED -> "意外中断"
     RecordingStatus.FAILED -> "未保存"
+}
+
+internal fun sessionLabel(phase: SessionPhase) = when (phase) {
+    SessionPhase.IDLE -> "随时开始"
+    SessionPhase.STARTING -> "正在打开麦克风…"
+    SessionPhase.RECORDING -> "正在录音"
+    SessionPhase.PAUSED -> "已暂停"
+    SessionPhase.SAVING -> "正在保存…"
+    SessionPhase.ERROR -> "需要留意"
 }
 
 @Preview(name = "外屏", widthDp = 380, heightDp = 800)
