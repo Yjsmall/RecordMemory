@@ -3,9 +3,12 @@ package dev.local.record.ui
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -15,10 +18,14 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import dev.local.record.settings.AppAppearance
 
-/** Restrained green accent with official Material 3 Expressive typography, shapes and motion. */
+/** Warm neutral surfaces, ink-green accents and a shared, restrained type scale. */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun RecordTheme(appearance: AppAppearance = AppAppearance.SYSTEM, dynamicColors: Boolean = false, content: @Composable () -> Unit) {
@@ -43,32 +50,62 @@ fun RecordTheme(appearance: AppAppearance = AppAppearance.SYSTEM, dynamicColors:
         if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
     } else if (dark) {
         darkColorScheme(
-            primary = Color(0xFFA5D0AE),
-            onPrimary = Color(0xFF133822),
-            primaryContainer = Color(0xFF2C4E37),
-            onPrimaryContainer = Color(0xFFBCE9C6),
-            secondary = Color(0xFFBCCCBF),
-            surface = Color(0xFF111813),
-            background = Color(0xFF111813),
-            surfaceContainer = Color(0xFF1D271F),
-            surfaceContainerLow = Color(0xFF172019),
-            onSurface = Color(0xFFE0E8DE),
-            onSurfaceVariant = Color(0xFFC0CBBD)
+            primary = Color(0xFFB4CFBF),
+            onPrimary = Color(0xFF193D31),
+            primaryContainer = Color(0xFF243F34),
+            onPrimaryContainer = Color(0xFFD4E6DA),
+            secondary = Color(0xFFBDC7BE),
+            secondaryContainer = Color(0xFF303B34),
+            onSecondaryContainer = Color(0xFFDCE5DD),
+            surface = Color(0xFF151916),
+            background = Color(0xFF151916),
+            surfaceContainerLowest = Color(0xFF1E2420),
+            surfaceContainer = Color(0xFF292F2A),
+            surfaceContainerLow = Color(0xFF202621),
+            surfaceContainerHigh = Color(0xFF303730),
+            surfaceContainerHighest = Color(0xFF384039),
+            onSurface = Color(0xFFE9EBE5),
+            onSurfaceVariant = Color(0xFFADB7AD),
+            outline = Color(0xFF778277),
+            outlineVariant = Color(0xFF3D473E)
         )
     } else {
         lightColorScheme(
-            primary = Color(0xFF436651),
+            primary = Color(0xFF315C49),
             onPrimary = Color.White,
-            primaryContainer = Color(0xFFD0E8D1),
-            onPrimaryContainer = Color(0xFF12361D),
-            secondary = Color(0xFF526355),
-            surface = Color(0xFFF8FAF6),
-            background = Color(0xFFF8FAF6),
-            surfaceContainer = Color(0xFFEDF1EB),
-            surfaceContainerLow = Color(0xFFF1F4EE),
-            onSurface = Color(0xFF19221B),
-            onSurfaceVariant = Color(0xFF536055)
+            primaryContainer = Color(0xFFE2EDE4),
+            onPrimaryContainer = Color(0xFF2C4B3B),
+            secondary = Color(0xFF626B61),
+            secondaryContainer = Color(0xFFE8EDE5),
+            onSecondaryContainer = Color(0xFF3C493D),
+            surface = Color(0xFFF5F5F0),
+            background = Color(0xFFF5F5F0),
+            surfaceContainerLowest = Color(0xFFFFFEFA),
+            surfaceContainer = Color(0xFFECEEE7),
+            surfaceContainerLow = Color(0xFFF0F1EA),
+            surfaceContainerHigh = Color(0xFFE6E9E0),
+            surfaceContainerHighest = Color(0xFFE0E4DA),
+            onSurface = Color(0xFF222B24),
+            onSurfaceVariant = Color(0xFF626E63),
+            outline = Color(0xFF818B7E),
+            outlineVariant = Color(0xFFDCE1D6)
         )
     }
-    MaterialExpressiveTheme(colorScheme = colors, motionScheme = MotionScheme.expressive(), content = content)
+    MaterialExpressiveTheme(
+        colorScheme = colors,
+        typography = Typography(
+            headlineLarge = TextStyle(fontWeight = FontWeight.Bold, fontSize = 32.sp, lineHeight = 40.sp, letterSpacing = (-0.6).sp),
+            headlineMedium = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 26.sp, lineHeight = 34.sp),
+            titleLarge = TextStyle(fontWeight = FontWeight.SemiBold, fontSize = 22.sp, lineHeight = 30.sp),
+            titleMedium = TextStyle(fontWeight = FontWeight.Medium, fontSize = 16.sp, lineHeight = 24.sp),
+            titleSmall = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp),
+            bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
+            bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 21.sp),
+            bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
+            labelLarge = TextStyle(fontWeight = FontWeight.Medium, fontSize = 14.sp, lineHeight = 20.sp)
+        ),
+        shapes = Shapes(small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(20.dp), large = RoundedCornerShape(28.dp), extraLarge = RoundedCornerShape(32.dp)),
+        motionScheme = MotionScheme.expressive(),
+        content = content
+    )
 }

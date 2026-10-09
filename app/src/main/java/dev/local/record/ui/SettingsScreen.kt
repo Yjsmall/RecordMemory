@@ -8,11 +8,15 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -23,10 +27,15 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,11 +50,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import dev.local.record.audio.SessionPhase
@@ -75,50 +87,47 @@ fun SettingsHome(state: SettingsUiState, model: SettingsViewModel, onConnection:
         Text(state.loadError ?: "正在读取设置…")
         return
     }
-    SettingsSection("AI 服务商", "可添加多个 provider 或自建连接，分别绑定文本能力与语音转写。没有配置也能录音和播放。")
-    Text("连接", style = MaterialTheme.typography.titleMedium)
-    if (config.connections.isEmpty()) Text("还没有 provider。支持 DeepSeek、Responses、自定义 OpenAI 兼容接口和豆包语音配置。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-    config.connections.forEach { connection ->
-        ListItem(
-            headlineContent = { Text(connection.name) },
-            supportingContent = { Text(if (connection.protocol in supportedProtocols) "${protocolLabel(connection.protocol)} · ${connection.baseUrl}" else "协议尚未支持 · 待配置") },
-            trailingContent = { Text("编辑") },
-            modifier = Modifier.clickable(enabled = !state.busy) { onConnection(connection.id) }.testTag("connection-${connection.id}")
-        )
+    SectionLabel("AI 服务", "${config.connections.size} 个")
+    SettingsGroup {
+        config.connections.forEach { connection ->
+            SettingsRow(connection.name, if (connection.protocol in supportedProtocols) protocolLabel(connection.protocol) else "协议待配置", RecordIcons.Cloud, "connection-${connection.id}", !state.busy) { onConnection(connection.id) }
+            GroupDivider()
+        }
+        SettingsRow("添加连接", if (config.connections.isEmpty()) "DeepSeek、豆包或自定义服务" else null, RecordIcons.Plus, "add-connection", !state.busy) { onConnection(null) }
     }
-    OutlinedButton(onClick = { onConnection(null) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth().testTag("add-connection")) { Text("添加连接") }
-    HorizontalDivider()
-    Text("模型与能力", style = MaterialTheme.typography.titleMedium)
-    Text("每项能力独立选择连接和模型。保存配置不会自动上传或生成内容。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    AiCapability.entries.forEach { capability ->
-        val binding = config.binding(capability)
-        val connection = config.connections.firstOrNull { it.id == binding.connectionId }
-        ListItem(
-            headlineContent = { Text(capability.label) },
-            supportingContent = {
-                Text(
-                    when {
-                        connection == null -> "未配置"
-                        connection.protocol !in supportedProtocols -> "协议尚未支持 · 待配置"
-                        binding.model.isBlank() -> "${connection.name} · 待填写模型"
-                        else -> "${connection.name} · ${binding.model} · 尚未验证能力"
-                    }
-                )
-            },
-            trailingContent = { Text("配置") },
-            modifier = Modifier.clickable(enabled = !state.busy) { onCapability(capability) }.testTag("capability-${capability.name}")
-        )
+    SectionLabel("模型与能力")
+    SettingsGroup {
+        AiCapability.entries.forEachIndexed { index, capability ->
+            val binding = config.binding(capability)
+            val connection = config.connections.firstOrNull { it.id == binding.connectionId }
+            SettingsRow(
+                capability.label,
+                when {
+                    connection == null -> "未配置"
+                    connection.protocol !in supportedProtocols -> "协议待配置"
+                    binding.model.isBlank() -> "${connection.name} · 选择模型"
+                    else -> "${connection.name} · ${binding.model}"
+                },
+                capabilityIcon(capability),
+                "capability-${capability.name}",
+                !state.busy
+            ) { onCapability(capability) }
+            if (index < AiCapability.entries.lastIndex) GroupDivider()
+        }
     }
-    Text("转写、标题、总结和记忆任务将在下一阶段接通。本地文本搜索无需模型，也不会使用 Embedding。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    HorizontalDivider()
-    Text("外观", style = MaterialTheme.typography.titleMedium)
-    Choice("主题", config.appearance.label, AppAppearance.entries.map { it.label }) { index -> model.appearance(AppAppearance.entries[index], config.dynamicColors) }
-    ToggleRow("使用系统动态配色", "关闭时使用随声记的柔和绿色", config.dynamicColors) { model.appearance(config.appearance, it) }
-    HorizontalDivider()
-    Text("配置迁移", style = MaterialTheme.typography.titleMedium)
-    Text("JSON 仅包含连接、能力、提示词和外观；不包含 API Key 或录音。导入前预览，已有同 ID 的连接和已绑定能力优先保留。", style = MaterialTheme.typography.bodyMedium)
-    OutlinedButton(onClick = { export.launch("随声记-AI配置.json") }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("导出配置（不含密钥）") }
-    OutlinedButton(onClick = { import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, enabled = !state.busy, modifier = Modifier.fillMaxWidth()) { Text("导入配置") }
+    Text("AI 功能待接入，当前仅保存配置", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
+    SectionLabel("外观")
+    SettingsGroup {
+        Choice("主题", config.appearance.label, AppAppearance.entries.map { it.label }) { index -> model.appearance(AppAppearance.entries[index], config.dynamicColors) }
+        GroupDivider()
+        ToggleRow("动态配色", "跟随系统壁纸", config.dynamicColors) { model.appearance(config.appearance, it) }
+    }
+    SectionLabel("配置迁移")
+    SettingsGroup {
+        SettingsRow("导出配置", "不含密钥与录音", RecordIcons.Export, enabled = !state.busy) { export.launch("随声记-AI配置.json") }
+        GroupDivider()
+        SettingsRow("导入配置", null, RecordIcons.Import, enabled = !state.busy) { import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
+    }
     state.pendingImport?.let { incoming ->
         val newCount = incoming.connections.count { next -> config.connections.none { it.id == next.id } }
         AlertDialog(
@@ -138,7 +147,6 @@ fun ConnectionEditor(state: SettingsUiState, model: SettingsViewModel, onDeleted
     var showKey by remember { mutableStateOf(false) }
     var advanced by rememberSaveable { mutableStateOf(false) }
     var delete by rememberSaveable { mutableStateOf(false) }
-    SettingsSection("服务商连接", "选择预设可填入地址和协议，模型在各项能力中配置。DeepSeek 支持 Responses 与 Chat Completions；豆包语音使用独立识别接口。")
     val presetLabel = when {
         connection.protocol == DOUBAO_ASR -> ProviderPreset.DOUBAO.label
         connection.baseUrl.trimEnd('/') == "https://api.deepseek.com" && connection.protocol == RESPONSES -> ProviderPreset.DEEPSEEK.label
@@ -146,31 +154,19 @@ fun ConnectionEditor(state: SettingsUiState, model: SettingsViewModel, onDeleted
         else -> ProviderPreset.CUSTOM_OPENAI.label
     }
     Choice("服务商预设", presetLabel, ProviderPreset.entries.map { it.label }) { model.applyPreset(ProviderPreset.entries[it]) }
-    Choice("接口协议", protocolLabel(connection.protocol), supportedProtocols.map(::protocolLabel)) { index ->
-        val protocol = supportedProtocols[index]
-        if (protocol == DOUBAO_ASR) {
-            model.applyPreset(ProviderPreset.DOUBAO)
-        } else {
-            model.updateConnection { it.copy(connection = it.connection.copy(protocol = protocol), key = "", clearKey = it.hasStoredKey) }
-        }
-    }
     if (connection.protocol !in supportedProtocols) {
         Text("导入协议 ${connection.protocol} 尚未支持。此连接不能发起请求。", color = MaterialTheme.colorScheme.error)
         OutlinedButton(onClick = { model.updateConnection { it.copy(connection = it.connection.copy(protocol = OPENAI_COMPATIBLE)) } }) { Text("改用 OpenAI 兼容协议") }
     }
     Field("连接名称", connection.name, { value -> model.updateConnection { it.copy(connection = it.connection.copy(name = value)) } }, "connection-name")
     Field("Base URL", connection.baseUrl, { value -> model.updateConnection { it.copy(connection = it.connection.copy(baseUrl = value)) } }, "base-url", keyboard = KeyboardType.Uri)
-    Text("保留地址中的 /v1 等前缀。仅支持 HTTPS，始终检查证书。手机的 localhost 指手机本身。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     if (connection.protocol == DOUBAO_ASR) {
         Choice("豆包鉴权", if (connection.doubaoLegacyAuth) "旧版 APP ID + Access Token" else "新版 API Key", listOf("新版 API Key", "旧版 APP ID + Access Token")) { index ->
             model.updateConnection { it.copy(connection = it.connection.copy(doubaoLegacyAuth = index == 1), key = "", clearKey = it.hasStoredKey) }
         }
         if (connection.doubaoLegacyAuth) Field("APP ID", connection.doubaoAppId, { value -> model.updateConnection { it.copy(connection = it.connection.copy(doubaoAppId = value)) } })
         Field("Resource ID", connection.doubaoResourceId, { value -> model.updateConnection { it.copy(connection = it.connection.copy(doubaoResourceId = value)) } }, "resource-id")
-        Text("使用豆包语音控制台的凭据，不是火山方舟聊天模型密钥。", style = MaterialTheme.typography.bodySmall)
-    } else {
-        ToggleRow("Bearer API Key 鉴权", "自建服务无鉴权时可关闭", connection.bearerAuth) { value -> model.updateConnection { it.copy(connection = it.connection.copy(bearerAuth = value)) } }
-        ToggleRow("提供同步语音转写接口", "仅在服务文档确认支持 /audio/transcriptions 时开启", connection.supportsTranscription) { value -> model.updateConnection { it.copy(connection = it.connection.copy(supportsTranscription = value)) } }
+        Text("请使用豆包语音服务凭据", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (connection.bearerAuth || connection.protocol == DOUBAO_ASR) {
         OutlinedTextField(
@@ -178,8 +174,12 @@ fun ConnectionEditor(state: SettingsUiState, model: SettingsViewModel, onDeleted
             onValueChange = { value -> model.updateConnection { it.copy(key = value, clearKey = false) } },
             label = {
                 val keyLabel = if (connection.protocol == DOUBAO_ASR && connection.doubaoLegacyAuth) "Access Token" else "API Key"
-                Text(if (draft.hasStoredKey && !draft.clearKey) "新 $keyLabel（留空保留已存密钥）" else keyLabel)
+                Text(keyLabel)
             },
+            placeholder = { Text(if (draft.hasStoredKey && !draft.clearKey) "已保存，留空保留" else "输入密钥") },
+            shape = RoundedCornerShape(16.dp),
+            colors = fieldColors(),
+            textStyle = MaterialTheme.typography.bodyLarge,
             visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = { TextButton(onClick = { showKey = !showKey }) { Text(if (showKey) "隐藏" else "显示") } },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -191,16 +191,35 @@ fun ConnectionEditor(state: SettingsUiState, model: SettingsViewModel, onDeleted
             if (draft.clearKey) {
                 "保存时将移除密钥"
             } else if (draft.hasStoredKey) {
-                "已存密钥受 Android Keystore 保护，不会回显或导出"
+                "密钥已保存 · 留空保留"
             } else {
-                "密钥仅加密保存在本机，不进入业务事件或普通导出"
+                "密钥仅加密保存在本机"
             },
             style = MaterialTheme.typography.bodySmall
         )
         if (draft.hasStoredKey) TextButton(onClick = { model.updateConnection { it.copy(clearKey = !it.clearKey, key = "") } }) { Text(if (draft.clearKey) "保留已存密钥" else "移除已存密钥") }
     }
-    TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "收起请求路径" else "请求路径（高级）") }
+    TextButton(onClick = { advanced = !advanced }, modifier = Modifier.testTag("advanced-settings")) {
+        Text(if (advanced) "收起高级设置" else "高级设置")
+        Spacer(Modifier.size(6.dp))
+        Icon(if (advanced) RecordIcons.Down else RecordIcons.Next, null, Modifier.size(16.dp))
+    }
     if (advanced) {
+        Choice("接口协议", protocolLabel(connection.protocol), supportedProtocols.map(::protocolLabel)) { index ->
+            val protocol = supportedProtocols[index]
+            if (protocol == DOUBAO_ASR) {
+                model.applyPreset(ProviderPreset.DOUBAO)
+            } else {
+                model.updateConnection { it.copy(connection = it.connection.copy(protocol = protocol), key = "", clearKey = it.hasStoredKey) }
+            }
+        }
+        if (connection.protocol != DOUBAO_ASR) {
+            SettingsGroup {
+                ToggleRow("API Key 鉴权", null, connection.bearerAuth) { value -> model.updateConnection { it.copy(connection = it.connection.copy(bearerAuth = value)) } }
+                GroupDivider()
+                ToggleRow("语音转写接口", "/audio/transcriptions", connection.supportsTranscription) { value -> model.updateConnection { it.copy(connection = it.connection.copy(supportsTranscription = value)) } }
+            }
+        }
         if (connection.protocol != DOUBAO_ASR) {
             Field("模型列表路径", connection.modelsPath, { value -> model.updateConnection { it.copy(connection = it.connection.copy(modelsPath = value)) } })
             if (connection.protocol == RESPONSES) {
@@ -211,22 +230,21 @@ fun ConnectionEditor(state: SettingsUiState, model: SettingsViewModel, onDeleted
         }
         if (connection.supportsTranscription || connection.protocol == DOUBAO_ASR) Field("转写路径", connection.transcriptionPath, { value -> model.updateConnection { it.copy(connection = it.connection.copy(transcriptionPath = value)) } })
     }
-    HorizontalDivider()
-    Text(if (connection.protocol == DOUBAO_ASR) "豆包没有兼容的模型列表端点。此处只检查配置格式，不联网；真实鉴权与识别需在后续转写任务中验证。" else "连接检查只获取模型列表，发送鉴权信息；不会发送录音、转写或提示词。列表可访问不代表模型支持转写或文本生成。", style = MaterialTheme.typography.bodyMedium)
+    Text(if (connection.protocol == DOUBAO_ASR) "仅检查配置，不验证语音识别" else "仅获取模型列表，不发送录音", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     OutlinedButton(onClick = model::checkConnection, enabled = !state.checking && !state.busy, modifier = Modifier.fillMaxWidth().testTag("check-connection")) {
         Text(
             if (state.checking) {
                 "正在检查…"
             } else if (connection.protocol == DOUBAO_ASR) {
-                "检查配置格式（不联网）"
+                "检查配置"
             } else {
-                "检查连接与模型列表"
+                "检查连接"
             }
         )
     }
     state.check?.let { result ->
         Text(result.message, color = MaterialTheme.colorScheme.primary)
-        Text(result.modelIds.take(60).joinToString("\n").ifEmpty { "服务返回空模型列表，请从服务文档确认模型名。" }, style = MaterialTheme.typography.bodySmall)
+        if (result.modelIds.isNotEmpty()) Text(result.modelIds.take(60).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (state.configuration?.connections?.any { it.id == connection.id } == true) {
         TextButton(onClick = { delete = true }, enabled = !state.busy) { Text("删除此连接", color = MaterialTheme.colorScheme.error) }
@@ -247,35 +265,32 @@ fun CapabilityEditor(state: SettingsUiState, model: SettingsViewModel) {
     val binding = state.bindingDraft ?: return
     var confirmTest by rememberSaveable { mutableStateOf(false) }
     val connections = state.configuration?.connections.orEmpty().filter { it.supports(binding.capability) }
-    SettingsSection(binding.capability.label, "${binding.capability.destination}到选定服务。当前只保存配置，尚未执行 AI 任务。")
     Choice(
         "连接",
         connections.firstOrNull { it.id == binding.connectionId }?.name ?: "未配置",
-        listOf("未配置（仅本地录音）") + connections.map { it.name }
+        listOf("未配置") + connections.map { it.name }
     ) { index ->
         val selected = connections.getOrNull(index - 1)
         model.updateBinding { it.copy(connectionId = selected?.id, model = selected?.modelSuggestions()?.firstOrNull().orEmpty(), reasoningEffort = "") }
     }
     if (connections.isEmpty()) Text("请先返回设置添加连接。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-    Field("模型名", binding.model, { value -> model.updateBinding { it.copy(model = value) } }, "model-name")
     val connection = connections.firstOrNull { it.id == binding.connectionId }
-    connection?.modelSuggestions()?.takeIf { it.isNotEmpty() }?.let { suggestions ->
-        Choice("文档预设模型", binding.model.ifBlank { "选择模型" }, suggestions) { index -> model.updateBinding { it.copy(model = suggestions[index]) } }
-    }
+    Field("模型名", binding.model, { value -> model.updateBinding { it.copy(model = value) } }, "model-name", suggestions = connection?.modelSuggestions().orEmpty())
     if (connection?.protocol == RESPONSES) {
         val efforts = listOf("", "none", "low", "medium", "high", "max")
         val labels = listOf("遵循服务默认值", "关闭思考 · none", "低 · low", "中 · medium", "高 · high", "最高 · max")
         Choice("推理强度", labels[efforts.indexOf(binding.reasoningEffort).coerceAtLeast(0)], labels) { index -> model.updateBinding { it.copy(reasoningEffort = efforts[index]) } }
-        Text("通过 /responses 发送 input 与 instructions。不同服务的推理等级和参数支持有差异，以服务文档为准。", style = MaterialTheme.typography.bodySmall)
     }
-    Text("填写服务提供的精确模型 ID。聊天模型与转写模型不能通用；模型列表只供参考。", style = MaterialTheme.typography.bodySmall)
     Field("语言", binding.language, { value -> model.updateBinding { it.copy(language = value) } }, "language")
-    Text(if (binding.capability == AiCapability.ASR) "默认 zh（中文）；语言代码及支持范围以所选语音服务为准，留空使用服务默认值。" else "默认 zh（中文）；用于后续文本生成的语言偏好。", style = MaterialTheme.typography.bodySmall)
+    SectionLabel("提示词")
     OutlinedTextField(
         value = binding.prompt,
         onValueChange = { value -> model.updateBinding { it.copy(prompt = value) } },
-        label = { Text(if (binding.capability == AiCapability.ASR) "转写提示（服务支持时使用）" else "提示词模板") },
-        minLines = 5,
+        placeholder = { Text(if (binding.capability == AiCapability.ASR) "补充专有名词或转写要求" else "输入整理要求") },
+        minLines = 4,
+        shape = RoundedCornerShape(16.dp),
+        colors = fieldColors(),
+        textStyle = MaterialTheme.typography.bodyMedium,
         enabled = !state.busy,
         modifier = Modifier.fillMaxWidth().testTag("prompt")
     )
@@ -283,16 +298,16 @@ fun CapabilityEditor(state: SettingsUiState, model: SettingsViewModel) {
     if (binding.capability == AiCapability.ASR) {
         Text(
             if (connection?.protocol == DOUBAO_ASR) {
-                "豆包使用 model_name（默认 bigmodel）与 Resource ID 选择语音模型。原始录音保持 M4A；当前识别接口的上传格式需另行适配，尚未接通音频上传。"
+                "豆包识别待接入 · M4A 上传格式需适配"
             } else {
-                "按 OpenAI 兼容同步转写接口配置。原始录音为 M4A，大小、时长和格式支持由所选服务决定；尚未验证识别能力。"
+                "语音转写待接入"
             },
-            style = MaterialTheme.typography.bodyMedium
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     } else {
-        Text("测试仅发送固定的连接检查文字，使用所选模型；会消耗服务额度，不发送录音或你的提示词。", style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = { confirmTest = true }, enabled = connection != null && binding.model.isNotBlank() && !state.testingModel && !state.busy, modifier = Modifier.fillMaxWidth().testTag("test-text-model")) {
-            Text(if (state.testingModel) "正在测试模型…" else "测试文本模型（调用 API）")
+            Text(if (state.testingModel) "正在测试…" else "测试文本模型")
         }
     }
     if (confirmTest) {
@@ -313,8 +328,8 @@ fun CapabilityEditor(state: SettingsUiState, model: SettingsViewModel) {
 
 private fun protocolLabel(protocol: String): String = when (protocol) {
     RESPONSES -> "Responses"
-    OPENAI_COMPATIBLE -> "OpenAI 兼容 · Chat Completions"
-    DOUBAO_ASR -> "豆包录音文件识别 · Flash"
+    OPENAI_COMPATIBLE -> "Chat Completions"
+    DOUBAO_ASR -> "豆包语音 · Flash"
     else -> "待配置 · $protocol"
 }
 
@@ -338,14 +353,14 @@ fun SettingsFrame(
     BackHandler(enabled = !state.busy, onBack = back)
     BackHandler(enabled = state.busy) { /* Atomic save finishes before leaving. */ }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.widthIn(max = 840.dp).fillMaxSize().testTag("settings-screen")) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = back, enabled = !state.busy) { Text("返回") }
+        Column(Modifier.widthIn(max = 680.dp).fillMaxSize().testTag("settings-screen")) {
+            Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 20.dp, top = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                IconButton(onClick = back, enabled = !state.busy) { Icon(RecordIcons.Back, "返回") }
                 Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                onSave?.let { save -> TextButton(onClick = save, enabled = !state.busy) { Text("保存") } }
+                onSave?.let { save -> Button(onClick = save, enabled = !state.busy) { Text("保存") } }
             }
             if (session.active) {
-                Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
+                Card(Modifier.fillMaxWidth().padding(horizontal = 20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                     Column(Modifier.padding(12.dp)) {
                         Text("${sessionLabel(session.phase)} · ${formatDuration(session.durationMs)}")
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -359,10 +374,14 @@ fun SettingsFrame(
             }
             Column(
                 Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 if (state.busy) CircularProgressIndicator()
-                state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("settings-message")) }
+                state.message?.let {
+                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                        Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("settings-message"))
+                    }
+                }
                 CompositionLocalProvider(LocalSettingsEnabled provides !state.busy) { content() }
             }
         }
@@ -384,22 +403,48 @@ fun SettingsFrame(
 }
 
 @Composable
-private fun SettingsSection(title: String, description: String) {
-    Text(title, style = MaterialTheme.typography.headlineSmall)
-    Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+private fun SettingsRow(title: String, subtitle: String?, icon: ImageVector, tag: String = title, enabled: Boolean = true, onClick: () -> Unit) {
+    ListItem(
+        headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
+        supportingContent = subtitle?.let { { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
+        leadingContent = { Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary) },
+        trailingContent = { Icon(RecordIcons.Next, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).testTag(tag).padding(vertical = 2.dp)
+    )
 }
 
 @Composable
-private fun Field(label: String, value: String, onValue: (String) -> Unit, tag: String = label, keyboard: KeyboardType = KeyboardType.Text) {
-    OutlinedTextField(value, onValue, Modifier.fillMaxWidth().testTag(tag), enabled = LocalSettingsEnabled.current, label = { Text(label) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = keyboard))
+private fun Field(label: String, value: String, onValue: (String) -> Unit, tag: String = label, keyboard: KeyboardType = KeyboardType.Text, suggestions: List<String> = emptyList()) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        OutlinedTextField(
+            value, onValue, Modifier.fillMaxWidth().testTag(tag), enabled = LocalSettingsEnabled.current,
+            label = { Text(label) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+            shape = RoundedCornerShape(16.dp), colors = fieldColors(), textStyle = MaterialTheme.typography.bodyLarge,
+            trailingIcon = if (suggestions.isEmpty()) {
+                null
+            } else {
+                { IconButton(onClick = { expanded = true }, enabled = LocalSettingsEnabled.current, modifier = Modifier.testTag("$tag-options")) { Icon(RecordIcons.Down, "选择推荐模型") } }
+            }
+        )
+        DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+            suggestions.forEach { suggestion ->
+                DropdownMenuItem(text = { Text(suggestion) }, onClick = {
+                    expanded = false
+                    onValue(suggestion)
+                })
+            }
+        }
+    }
 }
 
 @Composable
-private fun ToggleRow(title: String, description: String, value: Boolean, onValue: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+private fun ToggleRow(title: String, description: String?, value: Boolean, onValue: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f)) {
-            Text(title)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            description?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         Switch(value, onValue, enabled = LocalSettingsEnabled.current)
     }
@@ -408,20 +453,46 @@ private fun ToggleRow(title: String, description: String, value: Boolean, onValu
 @Composable
 private fun Choice(label: String, selected: String, options: List<String>, onSelect: (Int) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    Column {
-        Text(label, style = MaterialTheme.typography.labelLarge)
-        Box {
-            OutlinedButton(onClick = { expanded = true }, enabled = LocalSettingsEnabled.current, modifier = Modifier.fillMaxWidth()) { Text("$selected ▾") }
-            DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
-                options.forEachIndexed { index, option ->
-                    DropdownMenuItem(text = { Text(option) }, onClick = {
-                        expanded = false
-                        onSelect(index)
-                    })
+    Box {
+        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth().clickable(enabled = LocalSettingsEnabled.current) { expanded = true }.testTag("choice-$label")) {
+            Row(Modifier.heightIn(min = 64.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(selected, style = MaterialTheme.typography.titleMedium)
                 }
+                Icon(RecordIcons.Down, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+            options.forEachIndexed { index, option ->
+                DropdownMenuItem(text = { Text(option) }, onClick = {
+                    expanded = false
+                    onSelect(index)
+                })
             }
         }
     }
+}
+
+@Composable
+private fun fieldColors() = OutlinedTextFieldDefaults.colors(
+    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+    unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+)
+
+@Composable
+private fun GroupDivider() {
+    HorizontalDivider(Modifier.padding(start = 54.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+}
+
+private fun capabilityIcon(capability: AiCapability): ImageVector = when (capability) {
+    AiCapability.ASR -> RecordIcons.Wave
+    AiCapability.TITLE -> RecordIcons.Spark
+    AiCapability.SUMMARY -> RecordIcons.Text
+    AiCapability.MEMORY -> RecordIcons.Memory
+    AiCapability.ANSWER -> RecordIcons.Chat
 }
 
 @Preview(name = "窄窗配置", widthDp = 360, heightDp = 800)
@@ -431,7 +502,7 @@ private fun Choice(label: String, selected: String, options: List<String>, onSel
 private fun SettingsPreview() {
     RecordTheme {
         SettingsFrame("设置", SettingsUiState(), SessionState(), false, {}, null, {}, {}) {
-            SettingsSection("AI 服务", "连接、模型与能力。没有配置也能录音和播放。")
+            SectionLabel("AI 服务")
             Field("Base URL", "https://api.example.com/v1", {})
             Field("模型名", "your-transcription-model", {})
         }

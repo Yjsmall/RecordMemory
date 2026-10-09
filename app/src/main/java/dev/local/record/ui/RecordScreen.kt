@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -20,16 +21,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
@@ -47,7 +52,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
@@ -113,13 +120,17 @@ fun RecordScreen(
                 entry<Library>(
                     metadata = ListDetailSceneStrategy.listPane(detailPlaceholder = {
                         Box(Modifier.fillMaxSize().testTag("detail-placeholder"), contentAlignment = Alignment.Center) {
-                            Text("选择一条录音，听听当时的想法", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                                IconBadge(RecordIcons.Wave, size = 80)
+                                Text("选择录音", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     })
                 ) {
                     LibraryPane(
                         recordings, session, ready, problem, notificationsAllowed,
                         onStart, onPause, onStop, onNotifications,
+                        selectedId = backStack.filterIsInstance<Detail>().lastOrNull()?.id,
                         onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
                         onSelect = { id ->
                             while (backStack.size > 1) backStack.removeLastOrNull()
@@ -169,7 +180,7 @@ fun RecordScreen(
                             Unit
                         }
                         SettingsFrame(
-                            "连接",
+                            if (page.id == null) "添加服务" else "编辑服务",
                             settingsState,
                             session,
                             settingsState.connectionDraft?.dirty == true,
@@ -191,7 +202,7 @@ fun RecordScreen(
                             Unit
                         }
                         SettingsFrame(
-                            "能力配置",
+                            page.capability.label,
                             settingsState,
                             session,
                             settingsState.bindingDirty,
@@ -218,6 +229,7 @@ private fun LibraryPane(
     onPause: () -> Unit,
     onStop: () -> Unit,
     onNotifications: () -> Unit,
+    selectedId: String?,
     onSettings: (() -> Unit)?,
     onSelect: (String) -> Unit
 ) {
@@ -226,79 +238,92 @@ private fun LibraryPane(
         Modifier.fillMaxSize().testTag("recording-list"),
         state = scroll,
         contentPadding = PaddingValues(20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("随声记", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                    onSettings?.let { TextButton(onClick = it, modifier = Modifier.testTag("open-settings")) { Text("设置") } }
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("随声记", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f))
+                onSettings?.let {
+                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest) {
+                        IconButton(onClick = it, modifier = Modifier.testTag("open-settings")) { Icon(RecordIcons.Settings, "设置") }
+                    }
                 }
-                Text("留住此刻的想法", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item { RecordingControls(session, ready, onStart, onPause, onStop) }
         if (!notificationsAllowed) {
             item {
-                Column {
-                    Text("录音通知未开启。离开页面后，可通过桌面小组件停止录音。", style = MaterialTheme.typography.bodyMedium)
-                    TextButton(onClick = onNotifications) { Text("开启录音通知") }
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+                    Row(Modifier.padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("开启通知，便于后台停止", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        TextButton(onClick = onNotifications) { Text("开启") }
+                    }
                 }
             }
         }
         problem?.let { text -> item { Text(text, color = MaterialTheme.colorScheme.error) } }
-        item { Text("录音库 · ${recordings.size}", style = MaterialTheme.typography.titleMedium) }
+        item { SectionLabel("所有录音", "${recordings.size} 条") }
         if (recordings.isEmpty()) {
             item {
-                Text(
-                    if (ready) "还没有录音。点击开始，或将「随声记」小组件添加到桌面。" else "正在恢复录音库…",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        recordings.groupBy(::recordingDate).forEach { (date, entries) ->
-            item(key = "date-$date") { Text(date, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-            items(entries, key = { it.id }) { recording ->
-                Column {
-                    ListItem(
-                        headlineContent = { Text(recordingTitle(recording), maxLines = 2) },
-                        supportingContent = { Text("${formatDuration(recording.durationMs)} · ${statusLabel(recording.status)}") },
-                        modifier = Modifier.clickable { onSelect(recording.id) }.testTag("recording-${recording.id}")
-                    )
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Column(Modifier.fillMaxWidth().padding(vertical = 36.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    IconBadge(RecordIcons.Wave, size = 56)
+                    Text(if (ready) "第一段录音，从这里开始" else "正在恢复录音…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
-        item { Text("音频保存在本机 · M4A", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        recordings.groupBy(::recordingDate).forEach { (date, entries) ->
+            item(key = "date-$date") { Text(date, modifier = Modifier.padding(start = 4.dp, top = 8.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            items(entries, key = { it.id }) { recording ->
+                Surface(shape = RoundedCornerShape(20.dp), color = if (selectedId == recording.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth().clickable { onSelect(recording.id) }.testTag("recording-${recording.id}")) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        IconBadge(RecordIcons.Wave)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(recordingTitle(recording), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text("${formatDuration(recording.durationMs)} · ${if (recording.status == RecordingStatus.SAVED) "M4A" else statusLabel(recording.status)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Icon(RecordIcons.Next, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
 fun RecordingControls(session: SessionState, ready: Boolean, onStart: () -> Unit, onPause: () -> Unit, onStop: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)) {
-        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                sessionLabel(session.phase),
-                style = MaterialTheme.typography.titleMedium
-            )
+    Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)) {
+        Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (session.active) sessionLabel(session.phase) else "新录音", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                Text("M4A", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Text(formatDuration(if (session.active) session.durationMs else 0), style = MaterialTheme.typography.displayMedium, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Light, modifier = Modifier.padding(top = 8.dp).then(if (session.active) Modifier.testTag("live-duration") else Modifier))
             if (session.active) {
-                Text(formatDuration(session.durationMs), style = MaterialTheme.typography.displayMedium, modifier = Modifier.testTag("live-duration"))
                 LevelMeter(session.level, session.phase == SessionPhase.RECORDING)
                 if (session.silenced) {
-                    Text("麦克风受限，可能正在录入静音。请检查麦克风开关或其他录音应用。", color = MaterialTheme.colorScheme.error)
+                    Text("麦克风受限，请检查麦克风开关", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
                 if (session.phase == SessionPhase.RECORDING || session.phase == SessionPhase.PAUSED) {
                     // Column remains usable in narrow split windows and at large font sizes.
-                    OutlinedButton(onClick = onPause, modifier = Modifier.fillMaxWidth()) {
+                    FilledTonalButton(onClick = onPause, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                        Icon(if (session.phase == SessionPhase.PAUSED) RecordIcons.Mic else RecordIcons.Pause, null, Modifier.size(18.dp))
+                        Spacer(Modifier.size(8.dp))
                         Text(if (session.phase == SessionPhase.PAUSED) "继续录音" else "暂停录音")
                     }
                 }
-                Button(onClick = onStop, enabled = session.phase != SessionPhase.SAVING, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                Button(onClick = onStop, enabled = session.phase != SessionPhase.SAVING, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                    Icon(RecordIcons.Stop, null, Modifier.size(20.dp))
+                    Spacer(Modifier.size(8.dp))
                     Text("停止并保存")
                 }
             } else {
                 session.message?.let { Text(it, color = if (session.phase == SessionPhase.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
-                Button(onClick = onStart, enabled = ready, modifier = Modifier.fillMaxWidth().height(64.dp).testTag("start-recording")) { Text("开始录音") }
+                Text("本机保存", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Button(onClick = onStart, enabled = ready, modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp).testTag("start-recording")) {
+                    Icon(RecordIcons.Mic, null, Modifier.size(22.dp))
+                    Spacer(Modifier.size(10.dp))
+                    Text("开始录音")
+                }
             }
         }
     }
@@ -332,52 +357,70 @@ private fun DetailPane(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp).testTag("recording-detail"),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        if (showBack) TextButton(onClick = onBack) { Text("返回录音库") }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            if (showBack) IconButton(onClick = onBack) { Icon(RecordIcons.Back, "返回录音库") }
+            Text("录音详情", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            onSettings?.let { IconButton(onClick = it) { Icon(RecordIcons.Settings, "设置") } }
+        }
         if (recording == null) {
             Text("录音正在加载…")
             return@Column
         }
         Text(recordingTitle(recording), style = MaterialTheme.typography.headlineMedium)
-        Text(statusLabel(recording.status), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(formatDuration(recording.durationMs), style = MaterialTheme.typography.displaySmall)
+        Text("${recordingDate(recording)} · ${statusLabel(recording.status)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         recording.problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (session.active) {
-            Text("正在录音，停止保存后可播放。")
+            Text("录音中，保存后可播放", style = MaterialTheme.typography.bodyMedium)
             Button(onClick = onStop, enabled = session.phase != SessionPhase.SAVING) { Text("停止并保存") }
         } else if (recording.fileName != null) {
             val thisPlayback = playback.id == recording.id
             val position = if (thisPlayback) playback.positionMs else 0
             var seeking by remember(recording.id) { mutableFloatStateOf(-1f) }
-            Slider(
-                value = if (seeking >= 0) seeking else position.toFloat().coerceIn(0f, recording.durationMs.toFloat().coerceAtLeast(1f)),
-                onValueChange = { seeking = it },
-                onValueChangeFinished = {
-                    onSeek(seeking.toLong())
-                    seeking = -1f
-                },
-                valueRange = 0f..recording.durationMs.toFloat().coerceAtLeast(1f),
-                enabled = thisPlayback
-            )
-            Text("${formatDuration(position)} / ${formatDuration(recording.durationMs)}")
-            Button(onClick = { onPlay(recording) }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                Text(if (thisPlayback && playback.playing) "暂停播放" else "播放录音")
+            Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)) {
+                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    IconBadge(RecordIcons.Wave, Modifier.padding(vertical = 12.dp), size = 88)
+                    Text(formatDuration(recording.durationMs), style = MaterialTheme.typography.displaySmall, fontFamily = FontFamily.Monospace)
+                    Slider(
+                        value = if (seeking >= 0) seeking else position.toFloat().coerceIn(0f, recording.durationMs.toFloat().coerceAtLeast(1f)),
+                        onValueChange = { seeking = it },
+                        onValueChangeFinished = {
+                            onSeek(seeking.toLong())
+                            seeking = -1f
+                        },
+                        valueRange = 0f..recording.durationMs.toFloat().coerceAtLeast(1f),
+                        enabled = thisPlayback
+                    )
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(formatDuration(position), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(formatDuration(recording.durationMs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Button(onClick = { onPlay(recording) }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                        Icon(if (thisPlayback && playback.playing) RecordIcons.Pause else RecordIcons.Play, null, Modifier.size(20.dp))
+                        Spacer(Modifier.size(8.dp))
+                        Text(if (thisPlayback && playback.playing) "暂停播放" else "播放录音")
+                    }
+                }
             }
             if (thisPlayback) playback.problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
-        HorizontalDivider()
-        Text("原始音频", style = MaterialTheme.typography.titleMedium)
-        Text("M4A · AAC · 单声道\n保存在应用私有存储中", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("M4A · 本机保存", modifier = Modifier.align(Alignment.CenterHorizontally), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (onSettings != null) {
-            HorizontalDivider()
-            Text("转写与整理", style = MaterialTheme.typography.titleMedium)
-            Text("原始录音已保留。可先配置转写、标题和总结使用的服务；AI 任务将在后续版本接通。", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            OutlinedButton(onClick = onSettings) { Text("配置 AI 服务") }
+            SettingsGroup {
+                Row(Modifier.fillMaxWidth().clickable(onClick = onSettings).padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    IconBadge(RecordIcons.Spark)
+                    Column(Modifier.weight(1f)) {
+                        Text("AI 服务", style = MaterialTheme.typography.titleMedium)
+                        Text("配置模型 · 功能待接入", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Icon(RecordIcons.Next, null, Modifier.size(18.dp))
+                }
+            }
         }
     }
 }
 
 fun recordingTitle(recording: Recording): String = runCatching {
-    DateTimeFormatter.ofPattern("MM月dd日 HH:mm:ss").withZone(ZoneId.of(recording.zone)).format(Instant.ofEpochMilli(recording.startedAt))
+    DateTimeFormatter.ofPattern("HH:mm 的录音").withZone(ZoneId.of(recording.zone)).format(Instant.ofEpochMilli(recording.startedAt))
 }.getOrDefault("录音")
 
 private fun recordingDate(recording: Recording): String = runCatching {

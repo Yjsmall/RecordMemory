@@ -14,6 +14,7 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -83,14 +84,18 @@ class SettingsScreenTest {
     @Test
     fun savesConnectionAndIndependentCapabilityThenDeletionUnbinds() {
         content()
-        compose.onNodeWithText("DeepSeek · Responses ▾").performScrollTo().performClick()
+        compose.onNodeWithText("DeepSeek · Responses").performScrollTo().performClick()
         compose.onNodeWithText("自定义 · OpenAI 兼容").performClick()
+        compose.onNodeWithTag("choice-接口协议").assertDoesNotExist()
+        compose.onNodeWithTag("advanced-settings").performScrollTo().performClick()
+        compose.onNodeWithTag("choice-接口协议").performScrollTo().assertExists()
+        compose.onNodeWithTag("advanced-settings").performScrollTo().performClick()
         compose.onNodeWithTag("connection-name").performTextReplacement("测试服务")
         compose.onNodeWithTag("api-key").performScrollTo().performTextReplacement("synthetic-ui-key")
         compose.onNodeWithText("保存", useUnmergedTree = true).performClick()
         compose.waitUntil(5_000) { model.state.value.configuration?.connections?.size == 1 }
         compose.onNodeWithTag("capability-ASR").performScrollTo().performClick()
-        compose.onNodeWithText("未配置 ▾").performClick()
+        compose.onNodeWithText("未配置").performClick()
         compose.onNodeWithText("测试服务").performClick()
         compose.onNodeWithTag("model-name").performTextReplacement("speech-test")
         compose.onNodeWithTag("prompt").performScrollTo().performTextReplacement("请保留专有名词")
@@ -119,10 +124,10 @@ class SettingsScreenTest {
         restoration.emulateSavedInstanceStateRestore()
         compose.onNodeWithTag("connection-name").performScrollTo().assertTextContains("折叠草稿")
         assertEquals("synthetic-draft-key", model.state.value.connectionDraft?.key)
-        compose.onNodeWithText("返回", useUnmergedTree = true).performClick()
+        compose.onNodeWithContentDescription("返回").performClick()
         compose.onNodeWithText("继续编辑").performClick()
         compose.onNodeWithTag("connection-name").assertTextContains("折叠草稿")
-        compose.onNodeWithText("返回", useUnmergedTree = true).performClick()
+        compose.onNodeWithContentDescription("返回").performClick()
         compose.onNodeWithText("放弃修改").performClick()
         assertEquals(null, model.state.value.connectionDraft)
         assertTrue(model.state.value.configuration?.connections?.isEmpty() == true)
@@ -164,10 +169,10 @@ class SettingsScreenTest {
         compose.onNodeWithText("保存", useUnmergedTree = true).performClick()
         compose.waitUntil(5_000) { model.state.value.configuration?.connections?.size == 1 }
         compose.onNodeWithTag("capability-TITLE").performScrollTo().performClick()
-        compose.onNodeWithText("未配置 ▾").performClick()
+        compose.onNodeWithText("未配置").performClick()
         compose.onNodeWithText("DeepSeek").performClick()
         compose.onNodeWithTag("model-name").assertTextContains("deepseek-flash")
-        compose.onNodeWithText("deepseek-flash ▾").performScrollTo().performClick()
+        compose.onNodeWithTag("model-name-options").performScrollTo().performClick()
         compose.onNodeWithText("deepseek-v4-pro").performClick()
         compose.onNodeWithText("保存", useUnmergedTree = true).performClick()
         compose.waitUntil(5_000) { model.state.value.configuration?.binding(AiCapability.TITLE)?.model == "deepseek-v4-pro" }
@@ -179,13 +184,13 @@ class SettingsScreenTest {
     @Test
     fun doubaoPresetStoresSeparateSpeechModelAndResourceConfiguration() {
         content()
-        compose.onNodeWithText("DeepSeek · Responses ▾").performScrollTo().performClick()
+        compose.onNodeWithText("DeepSeek · Responses").performScrollTo().performClick()
         compose.onNodeWithText("豆包 · 录音文件识别").performClick()
         compose.onNodeWithTag("api-key").performScrollTo().performTextReplacement("synthetic-doubao-key")
         compose.onNodeWithText("保存", useUnmergedTree = true).performClick()
         compose.waitUntil(5_000) { model.state.value.configuration?.connections?.size == 1 }
         compose.onNodeWithTag("capability-ASR").performScrollTo().performClick()
-        compose.onNodeWithText("未配置 ▾").performClick()
+        compose.onNodeWithText("未配置").performClick()
         compose.onNodeWithText("豆包语音").performClick()
         compose.onNodeWithTag("model-name").assertTextContains("bigmodel")
         compose.onNodeWithText("保存", useUnmergedTree = true).performClick()
