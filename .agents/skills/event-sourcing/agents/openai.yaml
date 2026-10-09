@@ -1,0 +1,3 @@
+interface:
+  display_name: "Event Sourcing"
+  short_description: "Design and review event-sourced Android workflows"

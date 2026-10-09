@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "installedOn": "2026-10-09",
+  "timezone": "Asia/Shanghai",
+  "scope": "project",
+  "destination": ".agents/skills",
+  "verification": {
+    "scope": "initial-upstream-installation",
+    "skillEntryHashesMatched": 5,
+    "localReferencesChecked": 47,
+    "missingLocalReferences": 0
+  },
+  "skills": [
+    {
+      "name": "kotlin-specialist",
+      "repository": "https://github.com/Jeffallan/claude-skills",
+      "revision": "1be15d8064f88fc25216442406d40add8fd23b53",
+      "sourcePath": "skills/kotlin-specialist",
+      "installedPath": ".agents/skills/kotlin-specialist",
+      "skillMdSha256": "aad72ccc56c540cfc96860267fda368b10f5fb537ff7c8899fe5701a5ae63e48",
+      "license": "MIT",
+      "licenseFile": "LICENSE"
+    },
+    {
+      "name": "navigation-3",
+      "repository": "https://github.com/android/skills",
+      "revision": "42dc2270e96032bd860bb94511e440aa00a43125",
+      "sourcePath": "navigation/navigation-3",
+      "installedPath": ".agents/skills/navigation-3",
+      "skillMdSha256": "e5f448fc82a30e3a5efdb154dcc32fa77b806291d7fa571f201f3fb5530973fa",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.txt"
+    },
+    {
+      "name": "adaptive",
+      "repository": "https://github.com/android/skills",
+      "revision": "42dc2270e96032bd860bb94511e440aa00a43125",
+      "sourcePath": "jetpack-compose/adaptive",
+      "installedPath": ".agents/skills/adaptive",
+      "skillMdSha256": "5067113bb22ff5eb4b6e971bd7aa52000fbf0bd625c7d0bf1765cb4024b1da68",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.txt"
+    },
+    {
+      "name": "edge-to-edge",
+      "repository": "https://github.com/android/skills",
+      "revision": "42dc2270e96032bd860bb94511e440aa00a43125",
+      "sourcePath": "system/edge-to-edge",
+      "installedPath": ".agents/skills/edge-to-edge",
+      "skillMdSha256": "4ca04cb6a5330b96e51410bc815f878b4ca642fba46fe5e1ad724c94e04d6eb8",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.txt"
+    },
+    {
+      "name": "testing-setup",
+      "repository": "https://github.com/android/skills",
+      "revision": "42dc2270e96032bd860bb94511e440aa00a43125",
+      "sourcePath": "testing/testing-setup",
+      "installedPath": ".agents/skills/testing-setup",
+      "skillMdSha256": "7a249ae3a4d8d74caaebe31a9bc936afc557ba153b9c0080e3df3b23fd0c0dd2",
+      "license": "Apache-2.0",
+      "licenseFile": "LICENSE.txt"
+    },
+    {
+      "name": "event-sourcing",
+      "sourceKind": "local-authored",
+      "createdOn": "2026-10-09",
+      "installedPath": ".agents/skills/event-sourcing",
+      "skillMdSha256": "638ddfd627f73d49b848ed9c8f13606f9c9fabf54a5d2492e07d22870fbbd175",
+      "basedOn": [
+        {
+          "author": "Martin Fowler",
+          "title": "Event Sourcing",
+          "url": "https://martinfowler.com/eaaDev/EventSourcing.html",
+          "publishedOn": "2005-12-12",
+          "accessedOn": "2026-10-09",
+          "usage": "Original synthesis of principles; article text and example code not vendored"
+        }
+      ],
+      "projectReferences": [
+        "docs/architecture/event-sourcing.md",
+        "docs/requirements-analysis.md"
+      ],
+      "verification": {
+        "quickValidatePassed": true,
+        "localReferencesChecked": 3,
+        "missingLocalReferences": 0
+      }
+    }
+  ]
+}
