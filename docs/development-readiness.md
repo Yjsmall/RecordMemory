@@ -1,5 +1,7 @@
 # 开工准备：环境、jj 与首个开发阶段
 
+实施进展：jj 与 Android 工程已初始化，首个本地录音版本和实际验证结果见 [交付记录](first-recording-delivery.md)。下文保留开发前检查快照。
+
 检查日期：2026-10-09（Asia/Shanghai）。已确定：纯原生 Android、Kotlin／Compose、Material 3 Expressive 简洁风格、jj 管理代码；核心业务采用 Event Sourcing（录音、AI 处理、记忆变更）。事件模型和边界见 [事件溯源方案](architecture/event-sourcing.md)。
 
 本轮为环境检查与准备方案，尚未初始化版本库、建立 Android 工程、修改全局环境变量或运行应用构建。启动 adb 查询设备时，adb 服务已正常启动。

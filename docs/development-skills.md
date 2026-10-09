@@ -1,5 +1,7 @@
 # Android 开发技能选型
 
+实施进展：本地录音阶段已应用 kotlin-specialist、event-sourcing、adaptive、navigation-3、edge-to-edge、testing-setup 和 pwsh；结果见 [交付记录](first-recording-delivery.md)。下文保留安装与选型快照。
+
 核查与安装日期：2026-10-09（Asia/Shanghai）。项目约束：纯原生 Android、Kotlin／Jetpack Compose、Material 3 Expressive 简洁风格、vivo 折叠屏、小组件快速录音、可配置云端／自建 AI 和两类个人记忆。首批 5 个上游技能及本地创建的 event-sourcing 技能位于本项目 `.agents/skills/`。已检查本机开发环境，尚未创建 Android 工程或运行构建验证。
 
 ## 推荐组合

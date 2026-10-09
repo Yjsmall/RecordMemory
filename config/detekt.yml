@@ -1,0 +1,26 @@
+build:
+  maxIssues: 0
+config:
+  validation: true
+potential-bugs:
+  active: true
+  UnreachableCode:
+    active: true
+  UnnecessaryNotNullOperator:
+    active: true
+  UnsafeCast:
+    active: true
+exceptions:
+  active: true
+  SwallowedException:
+    active: true
+  PrintStackTrace:
+    active: true
+coroutines:
+  active: true
+  GlobalCoroutineUsage:
+    active: true
+style:
+  active: true
+  WildcardImport:
+    active: true
