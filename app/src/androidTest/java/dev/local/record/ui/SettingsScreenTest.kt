@@ -12,6 +12,7 @@ import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.ForcedSize
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -82,13 +83,33 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun providerPickerShowsBrandAndOnlyOneCustomPreset() {
+        content()
+        compose.onNodeWithContentDescription("DeepSeek 图标").assertExists()
+        compose.onNodeWithContentDescription("连接名称").assertExists()
+        compose.onNodeWithContentDescription("Base URL").assertExists()
+        compose.onNodeWithTag("choice-服务商").performScrollTo().performClick()
+        compose.onNodeWithText("DeepSeek · Responses").assertDoesNotExist()
+        compose.onNodeWithText("自定义 · Responses").assertDoesNotExist()
+        compose.onNodeWithText("自定义 · OpenAI 兼容").assertDoesNotExist()
+        compose.onNodeWithText("custom response").performClick()
+        assertEquals(dev.local.record.settings.RESPONSES, model.state.value.connectionDraft?.connection?.protocol)
+        compose.onNodeWithTag("choice-服务商").performScrollTo().assertTextContains("custom response")
+        screenshot("provider-picker-custom")
+    }
+
+    @Test
     fun savesConnectionAndIndependentCapabilityThenDeletionUnbinds() {
         content()
-        compose.onNodeWithText("DeepSeek · Responses").performScrollTo().performClick()
-        compose.onNodeWithText("自定义 · OpenAI 兼容").performClick()
+        compose.onNodeWithTag("choice-服务商").performScrollTo().performClick()
+        compose.onNodeWithText("自定义 · OpenAI 兼容").assertDoesNotExist()
+        compose.onNodeWithText("custom response").performClick()
         compose.onNodeWithTag("choice-接口协议").assertDoesNotExist()
         compose.onNodeWithTag("advanced-settings").performScrollTo().performClick()
         compose.onNodeWithTag("choice-接口协议").performScrollTo().assertExists()
+        compose.onNodeWithTag("choice-接口协议").performClick()
+        compose.onNodeWithText("Chat Completions").performClick()
+        compose.onAllNodes(isToggleable())[1].performClick()
         compose.onNodeWithTag("advanced-settings").performScrollTo().performClick()
         compose.onNodeWithTag("connection-name").performTextReplacement("测试服务")
         compose.onNodeWithTag("api-key").performScrollTo().performTextReplacement("synthetic-ui-key")
@@ -104,7 +125,7 @@ class SettingsScreenTest {
         assertEquals(null, model.state.value.configuration?.binding(AiCapability.TITLE)?.connectionId)
         val connectionId = requireNotNull(model.state.value.configuration?.connections?.first()?.id)
         compose.onNodeWithTag("connection-$connectionId").performScrollTo().performClick()
-        compose.onNodeWithText("删除此连接").performScrollTo().performClick()
+        compose.onNodeWithTag("delete-connection").performScrollTo().performClick()
         compose.onNodeWithText("删除", useUnmergedTree = true).performClick()
         compose.waitUntil(5_000) { model.state.value.configuration?.connections?.isEmpty() == true }
         assertEquals(null, model.state.value.configuration?.binding(AiCapability.ASR)?.connectionId)
@@ -184,8 +205,14 @@ class SettingsScreenTest {
     @Test
     fun doubaoPresetStoresSeparateSpeechModelAndResourceConfiguration() {
         content()
-        compose.onNodeWithText("DeepSeek · Responses").performScrollTo().performClick()
+        compose.onNodeWithTag("choice-服务商").performScrollTo().performClick()
         compose.onNodeWithText("豆包 · 录音文件识别").performClick()
+        compose.onNodeWithTag("choice-豆包鉴权").assertDoesNotExist()
+        compose.onNodeWithText("APP ID").assertDoesNotExist()
+        compose.onNodeWithText("Access Token").assertDoesNotExist()
+        compose.onNodeWithTag("check-connection").assertDoesNotExist()
+        compose.runOnIdle { model.checkConnection() }
+        assertTrue(!model.state.value.checking && model.state.value.check == null)
         compose.onNodeWithTag("api-key").performScrollTo().performTextReplacement("synthetic-doubao-key")
         compose.onNodeWithText("保存", useUnmergedTree = true).performClick()
         compose.waitUntil(5_000) { model.state.value.configuration?.connections?.size == 1 }

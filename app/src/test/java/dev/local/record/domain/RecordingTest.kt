@@ -3,6 +3,7 @@ package dev.local.record.domain
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -61,6 +62,22 @@ class RecordingTest {
     }
 
     @Test
+    fun deletionIsTerminalAndReplayDoesNotRestoreVisibleContent() {
+        val saved = evolve(evolve(Recording("r"), requested), RecordingEvent.Saved("r.m4a", 1_000))
+        validate(saved, RecordingEvent.Deleted)
+        val deleted = evolve(saved, RecordingEvent.Deleted)
+        assertEquals(RecordingStatus.DELETED, deleted.status)
+        assertEquals(0L, deleted.startedAt)
+        assertEquals(0L, deleted.durationMs)
+        assertNull(deleted.problem)
+        assertEquals("r.m4a", deleted.fileName)
+        assertThrows(IllegalArgumentException::class.java) { validate(deleted, RecordingEvent.Started) }
+        assertThrows(IllegalArgumentException::class.java) { validate(deleted, RecordingEvent.Deleted) }
+        assertThrows(IllegalArgumentException::class.java) { validate(evolve(Recording("active"), requested), RecordingEvent.Deleted) }
+        assertEquals(deleted, listOf(requested, RecordingEvent.Saved("r.m4a", 1_000), RecordingEvent.Deleted).fold(Recording("r"), ::evolve))
+    }
+
+    @Test
     fun allFactsRoundTripWithStableDiscriminator() {
         val events = listOf(
             requested,
@@ -69,7 +86,8 @@ class RecordingTest {
             RecordingEvent.Resumed,
             RecordingEvent.Saved("r.m4a", 300),
             RecordingEvent.Interrupted(null, 0, "lost"),
-            RecordingEvent.Failed("denied")
+            RecordingEvent.Failed("denied"),
+            RecordingEvent.Deleted
         )
         events.forEach { fact ->
             val payload = Json.encodeToString(RecordingEvent.serializer(), fact)

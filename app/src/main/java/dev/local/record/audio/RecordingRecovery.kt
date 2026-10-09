@@ -7,7 +7,8 @@ import java.io.File
 
 /** Reconcile unfinished histories with files once per process, before accepting new capture. */
 class RecordingRecovery(private val repository: RecordingRepository, private val audioDirectory: File) {
-    suspend fun recover(now: Long) {
+    suspend fun recover(now: Long): List<String> {
+        val cleanupProblems = RecordingDeletion(repository, audioDirectory).recover()
         repository.all().filter {
             it.status in setOf(RecordingStatus.REQUESTED, RecordingStatus.RECORDING, RecordingStatus.PAUSED)
         }.forEach { recording ->
@@ -22,5 +23,6 @@ class RecordingRecovery(private val repository: RecordingRepository, private val
             }
             repository.append(recording.id, recording.version, "${recording.id}:recovery", fact, now)
         }
+        return cleanupProblems
     }
 }

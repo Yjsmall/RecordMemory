@@ -33,9 +33,9 @@ class AppGraph @Inject constructor(@ApplicationContext context: Context) {
     val audioDirectory = File(context.filesDir, "audio").apply { mkdirs() }
     val session = MutableStateFlow(SessionState())
     private val recoveryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val recovery = recoveryScope.async {
+    private val recovery = recoveryScope.async<List<String>> {
         RecordingRecovery(repository, audioDirectory).recover(System.currentTimeMillis())
     }
 
-    suspend fun awaitRecovery() = recovery.await()
+    suspend fun awaitRecovery(): List<String> = recovery.await()
 }

@@ -94,6 +94,18 @@ class AiConfigurationTest {
     }
 
     @Test
+    fun simplifiedPresetsKeepLegacyOpenAiConnectionsUnchanged() {
+        assertEquals(listOf("DeepSeek", "custom response", "豆包 · 录音文件识别"), ProviderPreset.entries.map { it.label })
+        val custom = ProviderPreset.CUSTOM_RESPONSES.connection("custom")
+        assertEquals(RESPONSES, custom.protocol)
+        val legacy = AiConnection("legacy", baseUrl = "https://example.com/v1")
+        assertEquals(ProviderPreset.CUSTOM_RESPONSES, ProviderPreset.forConnection(legacy))
+        assertEquals(legacy, ConfigurationCodec.parse(ConfigurationCodec.export(AiConfiguration(connections = listOf(legacy)))).connections.single())
+        assertTrue(legacy.supports(AiCapability.ASR))
+        assertEquals(ProviderPreset.DEEPSEEK, ProviderPreset.forConnection(ProviderPreset.DEEPSEEK.connection("deepseek")))
+    }
+
+    @Test
     fun responseDiagnosticUsesInputInstructionsAndReadsOnlyFinalText() {
         val connection = ProviderPreset.DEEPSEEK.connection("a")
         val binding = CapabilityBinding(AiCapability.SUMMARY, "a", "deepseek-flash", prompt = "私人模板不发送", reasoningEffort = "none")
@@ -111,7 +123,7 @@ class AiConfigurationTest {
 
     @Test
     fun extendedConfigurationRoundTripsAndOldConfigurationDefaultsRemainReadable() {
-        val connections = listOf(ProviderPreset.DEEPSEEK.connection("a"), ProviderPreset.DOUBAO.connection("b"), ProviderPreset.CUSTOM_OPENAI.connection("c"))
+        val connections = listOf(ProviderPreset.DEEPSEEK.connection("a"), ProviderPreset.DOUBAO.connection("b"), AiConnection("c"))
         val config = AiConfiguration(connections = connections, bindings = listOf(CapabilityBinding(AiCapability.ASR, "b", "bigmodel"), CapabilityBinding(AiCapability.SUMMARY, "a", "deepseek-v4-pro", reasoningEffort = "high")))
         assertEquals(config, ConfigurationCodec.parse(ConfigurationCodec.export(config)))
         val old = """{"connections":[{"id":"old","name":"旧接口","protocol":"openai-compatible-v1","baseUrl":"https://example.com/v1"}]}"""

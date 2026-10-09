@@ -18,6 +18,31 @@ import org.junit.Test
 
 class SettingsRepositoryTest {
     @Test
+    fun doubaoOnlySavesApiKeyAndLegacyMigrationRequiresNewCredential() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val id = UUID.randomUUID().toString()
+        val repository = SettingsRepository(context, "test-$id.bin", "test-$id", scope)
+        try {
+            val modern = ProviderPreset.DOUBAO.connection("modern")
+            repository.saveConnection(modern, "synthetic-api-key")
+            repository.saveConnection(modern.copy(name = "新版豆包"), null)
+            assertEquals("synthetic-api-key", repository.settings.first().apiKeys[modern.id])
+            val legacy = modern.copy(id = "legacy", doubaoLegacyAuth = true, doubaoAppId = "synthetic-app-id")
+            assertTrue(runCatching { repository.saveConnection(legacy, "synthetic-token") }.isFailure)
+            repository.merge(AiConfiguration(connections = listOf(legacy)))
+            val migrated = legacy.copy(doubaoLegacyAuth = false, doubaoAppId = "")
+            assertTrue(runCatching { repository.saveConnection(migrated, null) }.isFailure)
+            assertTrue(repository.settings.first().configuration.connections.first { it.id == "legacy" }.doubaoLegacyAuth)
+            repository.saveConnection(migrated, "synthetic-new-key")
+            assertFalse(repository.settings.first().configuration.connections.first { it.id == "legacy" }.doubaoLegacyAuth)
+            assertEquals("synthetic-new-key", repository.settings.first().apiKeys["legacy"])
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun keystoreEncryptionAuthenticatesAndRoundTripsWithoutPlaintext() = runBlocking {
         val serializer = EncryptedSettingsSerializer("test-record-${UUID.randomUUID()}")
         val settings = PrivateSettings(AiConfiguration(connections = listOf(AiConnection("a"))), mapOf("a" to "test-secret-do-not-export"))

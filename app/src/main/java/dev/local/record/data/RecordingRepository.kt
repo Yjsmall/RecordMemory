@@ -3,6 +3,7 @@ package dev.local.record.data
 import androidx.room.withTransaction
 import dev.local.record.domain.Recording
 import dev.local.record.domain.RecordingEvent
+import dev.local.record.domain.RecordingStatus
 import dev.local.record.domain.evolve
 import dev.local.record.domain.validate
 import java.util.UUID
@@ -15,9 +16,10 @@ import kotlinx.serialization.json.jsonPrimitive
 class RecordingRepository(private val db: RecordDatabase) {
     private val dao = db.recordings()
     private val json = Json { classDiscriminator = "type" }
-    val recordings = dao.observe().map { rows -> rows.map(RecordingRow::domain) }
+    val recordings = dao.observe().map { rows -> rows.map(RecordingRow::domain).filter { it.status != RecordingStatus.DELETED } }
 
-    suspend fun all() = dao.all().map(RecordingRow::domain)
+    suspend fun all() = dao.all().map(RecordingRow::domain).filter { it.status != RecordingStatus.DELETED }
+    suspend fun deleted() = dao.all().map(RecordingRow::domain).filter { it.status == RecordingStatus.DELETED }
     suspend fun get(id: String) = dao.get(id)?.domain()
 
     suspend fun append(

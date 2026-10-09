@@ -28,6 +28,22 @@ import androidx.compose.ui.unit.dp
 
 /** Small, consistent outline icons; decorative icons leave semantics to their parent controls. */
 internal object RecordIcons {
+    val Delete = outline("Delete") {
+        moveTo(4f, 6f)
+        lineTo(20f, 6f)
+        moveTo(9f, 6f)
+        lineTo(9f, 3f)
+        lineTo(15f, 3f)
+        lineTo(15f, 6f)
+        moveTo(6f, 6f)
+        lineTo(7f, 21f)
+        lineTo(17f, 21f)
+        lineTo(18f, 6f)
+        moveTo(10f, 10f)
+        lineTo(10f, 17f)
+        moveTo(14f, 10f)
+        lineTo(14f, 17f)
+    }
     val Mic = outline("Mic") {
         moveTo(9f, 5f)
         curveTo(9f, 1f, 15f, 1f, 15f, 5f)

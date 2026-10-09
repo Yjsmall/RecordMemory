@@ -16,6 +16,9 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
@@ -32,6 +35,44 @@ import org.junit.Test
 class RecordScreenTest {
     @get:Rule val compose = createComposeRule()
     private val sample = Recording("sample", 3, 1_760_000_000_000, "Asia/Shanghai", RecordingStatus.SAVED, "sample.m4a", 15_000)
+
+    @Test
+    fun leftSwipeRevealsDeleteAndRequiresConfirmation() {
+        val recordings = mutableStateOf(listOf(sample))
+        var deletions = 0
+        compose.setContent {
+            RecordTheme {
+                RecordScreen(recordings.value, SessionState(), PlaybackState(), true, null, true, {}, {}, {}, {}, {}, {}, onDelete = {
+                    deletions++
+                    recordings.value = emptyList()
+                })
+            }
+        }
+        compose.onNodeWithTag("recording-sample").performScrollTo().performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("delete-recording-sample").assertExists()
+        assertEquals(0, deletions)
+        compose.onNodeWithTag("recording-sample").performTouchInput { swipeRight() }
+        compose.onNodeWithTag("delete-recording-sample").assertDoesNotExist()
+        compose.onNodeWithTag("recording-sample").performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("delete-recording-sample").performClick()
+        compose.onNodeWithText("取消").performClick()
+        assertEquals(0, deletions)
+        compose.onNodeWithTag("delete-recording-sample").performClick()
+        compose.onNodeWithTag("confirm-delete-recording").performClick()
+        assertEquals(1, deletions)
+        compose.onNodeWithTag("recording-sample").assertDoesNotExist()
+    }
+
+    @Test
+    fun activeRecordingCannotRevealDelete() {
+        compose.setContent {
+            RecordTheme {
+                RecordScreen(listOf(sample.copy(status = RecordingStatus.RECORDING)), SessionState(SessionPhase.RECORDING, sample.id), PlaybackState(), true, null, true, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithTag("recording-sample").performScrollTo().performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("delete-recording-sample").assertDoesNotExist()
+    }
 
     @Test
     fun navigationRestoresWithoutStartingRecording() {

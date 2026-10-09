@@ -12,17 +12,23 @@ const val DOUBAO_ASR = "doubao-asr-flash-v3"
 val supportedProtocols = listOf(RESPONSES, OPENAI_COMPATIBLE, DOUBAO_ASR)
 
 enum class ProviderPreset(val label: String) {
-    DEEPSEEK("DeepSeek · Responses"),
-    CUSTOM_RESPONSES("自定义 · Responses"),
-    CUSTOM_OPENAI("自定义 · OpenAI 兼容"),
+    DEEPSEEK("DeepSeek"),
+    CUSTOM_RESPONSES("custom response"),
     DOUBAO("豆包 · 录音文件识别")
     ;
 
     fun connection(id: String): AiConnection = when (this) {
         DEEPSEEK -> AiConnection(id, name = "DeepSeek", protocol = RESPONSES, baseUrl = "https://api.deepseek.com", supportsTranscription = false)
         CUSTOM_RESPONSES -> AiConnection(id, name = "Responses 接口", protocol = RESPONSES, supportsTranscription = false)
-        CUSTOM_OPENAI -> AiConnection(id)
         DOUBAO -> AiConnection(id, name = "豆包语音", protocol = DOUBAO_ASR, baseUrl = "https://openspeech.bytedance.com", transcriptionPath = "/api/v3/auc/bigmodel/recognize/flash", supportsTranscription = true)
+    }
+
+    companion object {
+        fun forConnection(connection: AiConnection): ProviderPreset = when {
+            connection.protocol == DOUBAO_ASR -> DOUBAO
+            connection.protocol == RESPONSES && runCatching { URI(connection.baseUrl).host == "api.deepseek.com" }.getOrDefault(false) -> DEEPSEEK
+            else -> CUSTOM_RESPONSES
+        }
     }
 }
 

@@ -54,12 +54,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import dev.local.record.R
 import dev.local.record.audio.SessionPhase
 import dev.local.record.audio.SessionState
 import dev.local.record.audio.formatDuration
@@ -90,7 +94,7 @@ fun SettingsHome(state: SettingsUiState, model: SettingsViewModel, onConnection:
     SectionLabel("AI 服务", "${config.connections.size} 个")
     SettingsGroup {
         config.connections.forEach { connection ->
-            SettingsRow(connection.name, if (connection.protocol in supportedProtocols) protocolLabel(connection.protocol) else "协议待配置", RecordIcons.Cloud, "connection-${connection.id}", !state.busy) { onConnection(connection.id) }
+            SettingsRow(connection.name, if (connection.protocol in supportedProtocols) protocolLabel(connection.protocol) else "协议待配置", RecordIcons.Cloud, "connection-${connection.id}", !state.busy, leadingIcon = { ProviderIcon(ProviderPreset.forConnection(connection)) }) { onConnection(connection.id) }
             GroupDivider()
         }
         SettingsRow("添加连接", if (config.connections.isEmpty()) "DeepSeek、豆包或自定义服务" else null, RecordIcons.Plus, "add-connection", !state.busy) { onConnection(null) }
@@ -147,13 +151,14 @@ fun ConnectionEditor(state: SettingsUiState, model: SettingsViewModel, onDeleted
     var showKey by remember { mutableStateOf(false) }
     var advanced by rememberSaveable { mutableStateOf(false) }
     var delete by rememberSaveable { mutableStateOf(false) }
-    val presetLabel = when {
-        connection.protocol == DOUBAO_ASR -> ProviderPreset.DOUBAO.label
-        connection.baseUrl.trimEnd('/') == "https://api.deepseek.com" && connection.protocol == RESPONSES -> ProviderPreset.DEEPSEEK.label
-        connection.protocol == RESPONSES -> ProviderPreset.CUSTOM_RESPONSES.label
-        else -> ProviderPreset.CUSTOM_OPENAI.label
-    }
-    Choice("服务商预设", presetLabel, ProviderPreset.entries.map { it.label }) { model.applyPreset(ProviderPreset.entries[it]) }
+    val preset = ProviderPreset.forConnection(connection)
+    Choice(
+        "服务商",
+        preset.label,
+        ProviderPreset.entries.map { it.label },
+        selectedIcon = { ProviderIcon(preset) },
+        optionIcon = { ProviderIcon(ProviderPreset.entries[it]) }
+    ) { model.applyPreset(ProviderPreset.entries[it]) }
     if (connection.protocol !in supportedProtocols) {
         Text("导入协议 ${connection.protocol} 尚未支持。此连接不能发起请求。", color = MaterialTheme.colorScheme.error)
         OutlinedButton(onClick = { model.updateConnection { it.copy(connection = it.connection.copy(protocol = OPENAI_COMPATIBLE)) } }) { Text("改用 OpenAI 兼容协议") }
@@ -161,21 +166,14 @@ fun ConnectionEditor(state: SettingsUiState, model: SettingsViewModel, onDeleted
     Field("连接名称", connection.name, { value -> model.updateConnection { it.copy(connection = it.connection.copy(name = value)) } }, "connection-name")
     Field("Base URL", connection.baseUrl, { value -> model.updateConnection { it.copy(connection = it.connection.copy(baseUrl = value)) } }, "base-url", keyboard = KeyboardType.Uri)
     if (connection.protocol == DOUBAO_ASR) {
-        Choice("豆包鉴权", if (connection.doubaoLegacyAuth) "旧版 APP ID + Access Token" else "新版 API Key", listOf("新版 API Key", "旧版 APP ID + Access Token")) { index ->
-            model.updateConnection { it.copy(connection = it.connection.copy(doubaoLegacyAuth = index == 1), key = "", clearKey = it.hasStoredKey) }
-        }
-        if (connection.doubaoLegacyAuth) Field("APP ID", connection.doubaoAppId, { value -> model.updateConnection { it.copy(connection = it.connection.copy(doubaoAppId = value)) } })
         Field("Resource ID", connection.doubaoResourceId, { value -> model.updateConnection { it.copy(connection = it.connection.copy(doubaoResourceId = value)) } }, "resource-id")
-        Text("请使用豆包语音服务凭据", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("使用豆包语音服务 API Key", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (connection.bearerAuth || connection.protocol == DOUBAO_ASR) {
         OutlinedTextField(
             value = draft.key,
             onValueChange = { value -> model.updateConnection { it.copy(key = value, clearKey = false) } },
-            label = {
-                val keyLabel = if (connection.protocol == DOUBAO_ASR && connection.doubaoLegacyAuth) "Access Token" else "API Key"
-                Text(keyLabel)
-            },
+            label = { Text("API Key") },
             placeholder = { Text(if (draft.hasStoredKey && !draft.clearKey) "已保存，留空保留" else "输入密钥") },
             shape = RoundedCornerShape(16.dp),
             colors = fieldColors(),
@@ -185,7 +183,7 @@ fun ConnectionEditor(state: SettingsUiState, model: SettingsViewModel, onDeleted
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             enabled = !state.busy,
             singleLine = true,
-            modifier = Modifier.fillMaxWidth().testTag("api-key")
+            modifier = Modifier.fillMaxWidth().testTag("api-key").semantics { contentDescription = "API Key" }
         )
         Text(
             if (draft.clearKey) {
@@ -230,24 +228,36 @@ fun ConnectionEditor(state: SettingsUiState, model: SettingsViewModel, onDeleted
         }
         if (connection.supportsTranscription || connection.protocol == DOUBAO_ASR) Field("转写路径", connection.transcriptionPath, { value -> model.updateConnection { it.copy(connection = it.connection.copy(transcriptionPath = value)) } })
     }
-    Text(if (connection.protocol == DOUBAO_ASR) "仅检查配置，不验证语音识别" else "仅获取模型列表，不发送录音", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    OutlinedButton(onClick = model::checkConnection, enabled = !state.checking && !state.busy, modifier = Modifier.fillMaxWidth().testTag("check-connection")) {
-        Text(
-            if (state.checking) {
-                "正在检查…"
-            } else if (connection.protocol == DOUBAO_ASR) {
-                "检查配置"
-            } else {
-                "检查连接"
-            }
-        )
-    }
-    state.check?.let { result ->
-        Text(result.message, color = MaterialTheme.colorScheme.primary)
-        if (result.modelIds.isNotEmpty()) Text(result.modelIds.take(60).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (connection.protocol != DOUBAO_ASR) {
+        Text("仅获取模型列表，不发送录音", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        OutlinedButton(onClick = model::checkConnection, enabled = !state.checking && !state.busy, modifier = Modifier.fillMaxWidth().testTag("check-connection")) {
+            Text(
+                if (state.checking) {
+                    "正在检查…"
+                } else {
+                    "检查连接"
+                }
+            )
+        }
+        state.check?.let { result ->
+            Text(result.message, color = MaterialTheme.colorScheme.primary)
+            if (result.modelIds.isNotEmpty()) Text(result.modelIds.take(60).joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
     if (state.configuration?.connections?.any { it.id == connection.id } == true) {
-        TextButton(onClick = { delete = true }, enabled = !state.busy) { Text("删除此连接", color = MaterialTheme.colorScheme.error) }
+        Surface(
+            onClick = { delete = true },
+            enabled = !state.busy,
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.errorContainer,
+            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.fillMaxWidth().testTag("delete-connection")
+        ) {
+            Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Icon(RecordIcons.Delete, null, Modifier.size(22.dp))
+                Text("删除连接", style = MaterialTheme.typography.titleMedium)
+            }
+        }
     }
     if (delete) {
         AlertDialog(
@@ -403,11 +413,11 @@ fun SettingsFrame(
 }
 
 @Composable
-private fun SettingsRow(title: String, subtitle: String?, icon: ImageVector, tag: String = title, enabled: Boolean = true, onClick: () -> Unit) {
+private fun SettingsRow(title: String, subtitle: String?, icon: ImageVector, tag: String = title, enabled: Boolean = true, leadingIcon: (@Composable () -> Unit)? = null, onClick: () -> Unit) {
     ListItem(
         headlineContent = { Text(title, style = MaterialTheme.typography.titleMedium) },
         supportingContent = subtitle?.let { { Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
-        leadingContent = { Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary) },
+        leadingContent = leadingIcon ?: { Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary) },
         trailingContent = { Icon(RecordIcons.Next, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick).testTag(tag).padding(vertical = 2.dp)
@@ -419,8 +429,9 @@ private fun Field(label: String, value: String, onValue: (String) -> Unit, tag: 
     var expanded by remember { mutableStateOf(false) }
     Box {
         OutlinedTextField(
-            value, onValue, Modifier.fillMaxWidth().testTag(tag), enabled = LocalSettingsEnabled.current,
-            label = { Text(label) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = keyboard),
+            value, onValue, Modifier.fillMaxWidth().testTag(tag).semantics { contentDescription = label }, enabled = LocalSettingsEnabled.current,
+            label = { Text(label) },
+            singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = keyboard),
             shape = RoundedCornerShape(16.dp), colors = fieldColors(), textStyle = MaterialTheme.typography.bodyLarge,
             trailingIcon = if (suggestions.isEmpty()) {
                 null
@@ -440,6 +451,15 @@ private fun Field(label: String, value: String, onValue: (String) -> Unit, tag: 
 }
 
 @Composable
+private fun ProviderIcon(preset: ProviderPreset) {
+    if (preset == ProviderPreset.DEEPSEEK) {
+        Icon(painterResource(R.drawable.ic_deepseek), "DeepSeek 图标", Modifier.size(26.dp), tint = Color.Unspecified)
+    } else {
+        Icon(if (preset == ProviderPreset.DOUBAO) RecordIcons.Wave else RecordIcons.Cloud, null, Modifier.size(24.dp), tint = MaterialTheme.colorScheme.primary)
+    }
+}
+
+@Composable
 private fun ToggleRow(title: String, description: String?, value: Boolean, onValue: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(Modifier.weight(1f)) {
@@ -451,11 +471,12 @@ private fun ToggleRow(title: String, description: String?, value: Boolean, onVal
 }
 
 @Composable
-private fun Choice(label: String, selected: String, options: List<String>, onSelect: (Int) -> Unit) {
+private fun Choice(label: String, selected: String, options: List<String>, selectedIcon: (@Composable () -> Unit)? = null, optionIcon: (@Composable (Int) -> Unit)? = null, onSelect: (Int) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth().clickable(enabled = LocalSettingsEnabled.current) { expanded = true }.testTag("choice-$label")) {
+        Surface(onClick = { expanded = true }, enabled = LocalSettingsEnabled.current, shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth().testTag("choice-$label")) {
             Row(Modifier.heightIn(min = 64.dp).padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                selectedIcon?.invoke()
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(selected, style = MaterialTheme.typography.titleMedium)
@@ -463,9 +484,9 @@ private fun Choice(label: String, selected: String, options: List<String>, onSel
                 Icon(RecordIcons.Down, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+        DropdownMenu(expanded, onDismissRequest = { expanded = false }, shape = RoundedCornerShape(20.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerLowest, tonalElevation = 0.dp) {
             options.forEachIndexed { index, option ->
-                DropdownMenuItem(text = { Text(option) }, onClick = {
+                DropdownMenuItem(text = { Text(option) }, leadingIcon = optionIcon?.let { { it(index) } }, onClick = {
                     expanded = false
                     onSelect(index)
                 })
@@ -476,8 +497,8 @@ private fun Choice(label: String, selected: String, options: List<String>, onSel
 
 @Composable
 private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+    unfocusedContainerColor = Color.Transparent,
+    focusedContainerColor = Color.Transparent,
     unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
     unfocusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
 )

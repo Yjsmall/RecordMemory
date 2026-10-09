@@ -81,7 +81,8 @@ class MainActivity : ComponentActivity() {
                     onPlay = model::play, onSeek = model::seek,
                     onNotifications = ::requestNotifications,
                     settingsState = settingsState,
-                    settingsModel = settingsModel
+                    settingsModel = settingsModel,
+                    onDelete = model::delete
                 )
             }
         }

@@ -34,9 +34,12 @@ class SettingsRepository(
     val configuration = settings.map { it.configuration }
 
     suspend fun saveConnection(connection: AiConnection, key: String?, clearKey: Boolean = false) {
+        require(connection.protocol != DOUBAO_ASR || !connection.doubaoLegacyAuth) { "豆包仅支持新版 API Key 鉴权" }
         validateConnection(connection)
         require(key == null || (key.length <= 8192 && key.none { it == '\r' || it == '\n' })) { "密钥格式无效" }
         store.updateData { current ->
+            val previous = current.configuration.connections.firstOrNull { it.id == connection.id }
+            require(connection.protocol != DOUBAO_ASR || previous?.doubaoLegacyAuth != true || !key.isNullOrBlank()) { "请填写新版豆包 API Key" }
             val config = current.configuration.copy(connections = current.configuration.connections.filterNot { it.id == connection.id } + connection)
             validateConfiguration(config)
             val keys = when {

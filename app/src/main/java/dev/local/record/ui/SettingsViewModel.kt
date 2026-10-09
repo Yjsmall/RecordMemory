@@ -82,8 +82,12 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
         cancelCheck()
         val connection = privateSettings.configuration.connections.firstOrNull { it.id == id } ?: ProviderPreset.DEEPSEEK.connection(UUID.randomUUID().toString())
         mutable.value = mutable.value.copy(
-            connectionDraft = ConnectionDraft(connection, hasStoredKey = privateSettings.apiKeys.containsKey(connection.id)),
-            message = null,
+            connectionDraft = if (connection.protocol == DOUBAO_ASR && connection.doubaoLegacyAuth) {
+                ConnectionDraft(connection.copy(doubaoLegacyAuth = false, doubaoAppId = ""), clearKey = true, dirty = true)
+            } else {
+                ConnectionDraft(connection, hasStoredKey = privateSettings.apiKeys.containsKey(connection.id))
+            },
+            message = if (connection.protocol == DOUBAO_ASR && connection.doubaoLegacyAuth) "请填写新版豆包 API Key；旧凭据不会作为 API Key 使用。保存前原配置保持不变。" else null,
             check = null
         )
     }
@@ -115,6 +119,8 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
     fun saveConnection(onSaved: () -> Unit) {
         val draft = mutable.value.connectionDraft ?: return
         operation {
+            val previous = privateSettings.configuration.connections.firstOrNull { it.id == draft.connection.id }
+            require(draft.connection.protocol != DOUBAO_ASR || previous?.doubaoLegacyAuth != true || draft.key.isNotBlank()) { "请填写新版豆包 API Key" }
             repository.saveConnection(draft.connection, draft.key.takeIf { it.isNotBlank() }, draft.clearKey)
             discardDraft()
             mutable.value = mutable.value.copy(message = "连接已保存")
@@ -145,16 +151,12 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
 
     fun checkConnection() {
         val draft = mutable.value.connectionDraft ?: return
+        if (draft.connection.protocol == DOUBAO_ASR) return
         cancelCheck()
         val generation = checkGeneration
         mutable.value = mutable.value.copy(checking = true, message = null, check = null)
         checkJob = viewModelScope.launch {
             try {
-                if (draft.connection.protocol == DOUBAO_ASR) {
-                    dev.local.record.settings.validateConnection(draft.connection)
-                    mutable.value = mutable.value.copy(message = "豆包配置格式有效。语音鉴权和识别需要上传测试音频，此处不发起请求；尚未验证。")
-                    return@launch
-                }
                 val key = when {
                     draft.clearKey -> null
                     draft.key.isNotBlank() -> draft.key.trim()

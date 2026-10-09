@@ -45,7 +45,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -103,9 +105,29 @@ fun RecordScreen(
     onSeek: (Long) -> Unit,
     onNotifications: () -> Unit,
     settingsState: SettingsUiState = SettingsUiState(),
-    settingsModel: SettingsViewModel? = null
+    settingsModel: SettingsViewModel? = null,
+    onDelete: (Recording) -> Unit = {}
 ) {
     val backStack = rememberNavBackStack(Library)
+    var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
+    val pendingDelete = recordings.firstOrNull { it.id == deleteId }
+    if (pendingDelete != null) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { deleteId = null },
+            title = { Text("删除这段录音？") },
+            text = { Text("${recordingTitle(pendingDelete)}\n录音及本机音频将被删除，无法恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteId = null
+                    onDelete(pendingDelete)
+                    if (backStack.filterIsInstance<Detail>().any { it.id == pendingDelete.id }) {
+                        while (backStack.size > 1) backStack.removeLastOrNull()
+                    }
+                }, modifier = Modifier.testTag("confirm-delete-recording")) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deleteId = null }) { Text("取消") } }
+        )
+    }
     val windowInfo = currentWindowAdaptiveInfo()
     val directive = calculatePaneScaffoldDirective(windowInfo)
     val wide = directive.maxHorizontalPartitions > 1
@@ -131,6 +153,7 @@ fun RecordScreen(
                         recordings, session, ready, problem, notificationsAllowed,
                         onStart, onPause, onStop, onNotifications,
                         selectedId = backStack.filterIsInstance<Detail>().lastOrNull()?.id,
+                        onDelete = { deleteId = it.id },
                         onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
                         onSelect = { id ->
                             while (backStack.size > 1) backStack.removeLastOrNull()
@@ -230,6 +253,7 @@ private fun LibraryPane(
     onStop: () -> Unit,
     onNotifications: () -> Unit,
     selectedId: String?,
+    onDelete: (Recording) -> Unit,
     onSettings: (() -> Unit)?,
     onSelect: (String) -> Unit
 ) {
@@ -274,14 +298,16 @@ private fun LibraryPane(
         recordings.groupBy(::recordingDate).forEach { (date, entries) ->
             item(key = "date-$date") { Text(date, modifier = Modifier.padding(start = 4.dp, top = 8.dp), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             items(entries, key = { it.id }) { recording ->
-                Surface(shape = RoundedCornerShape(20.dp), color = if (selectedId == recording.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth().clickable { onSelect(recording.id) }.testTag("recording-${recording.id}")) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        IconBadge(RecordIcons.Wave)
-                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(recordingTitle(recording), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text("${formatDuration(recording.durationMs)} · ${if (recording.status == RecordingStatus.SAVED) "M4A" else statusLabel(recording.status)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SwipeRecordingRow(recording.id, ready && recording.status in setOf(RecordingStatus.SAVED, RecordingStatus.INTERRUPTED, RecordingStatus.FAILED), { onDelete(recording) }) {
+                    Surface(onClick = { onSelect(recording.id) }, shape = RoundedCornerShape(20.dp), color = if (selectedId == recording.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth().testTag("recording-${recording.id}")) {
+                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            IconBadge(RecordIcons.Wave)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(recordingTitle(recording), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text("${formatDuration(recording.durationMs)} · ${if (recording.status == RecordingStatus.SAVED) "M4A" else statusLabel(recording.status)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Icon(RecordIcons.Next, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Icon(RecordIcons.Next, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -434,6 +460,7 @@ fun statusLabel(status: RecordingStatus) = when (status) {
     RecordingStatus.SAVED -> "已保存"
     RecordingStatus.INTERRUPTED -> "意外中断"
     RecordingStatus.FAILED -> "未保存"
+    RecordingStatus.DELETED -> "已删除"
 }
 
 internal fun sessionLabel(phase: SessionPhase) = when (phase) {

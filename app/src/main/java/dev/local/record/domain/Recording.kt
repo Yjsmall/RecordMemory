@@ -33,10 +33,14 @@ sealed interface RecordingEvent {
     @Serializable
     @SerialName("RecordingFailed")
     data class Failed(val reason: String) : RecordingEvent
+
+    @Serializable
+    @SerialName("RecordingDeleted")
+    data object Deleted : RecordingEvent
 }
 
 @Serializable
-enum class RecordingStatus { REQUESTED, RECORDING, PAUSED, SAVED, INTERRUPTED, FAILED }
+enum class RecordingStatus { REQUESTED, RECORDING, PAUSED, SAVED, INTERRUPTED, FAILED, DELETED }
 
 @Serializable
 data class Recording(
@@ -68,6 +72,7 @@ fun evolve(state: Recording, event: RecordingEvent): Recording = when (event) {
         problem = event.reason
     )
     is RecordingEvent.Failed -> state.copy(status = RecordingStatus.FAILED, problem = event.reason)
+    RecordingEvent.Deleted -> state.copy(status = RecordingStatus.DELETED, startedAt = 0, zone = "UTC", durationMs = 0, problem = null)
 }.copy(version = state.version + 1)
 
 /** Validate new facts at the command boundary; replay never re-runs current command rules. */
@@ -82,6 +87,7 @@ fun validate(state: Recording, event: RecordingEvent) {
             is RecordingEvent.Saved -> active && state.version > 0 && event.durationMs > 0
             is RecordingEvent.Interrupted -> active && state.version > 0
             is RecordingEvent.Failed -> active && state.version > 0
+            RecordingEvent.Deleted -> state.version > 0 && !active && state.status != RecordingStatus.DELETED
         }
     ) { "Invalid recording transition: ${state.status} -> $event" }
 }

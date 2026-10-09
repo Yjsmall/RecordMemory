@@ -4,7 +4,11 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import dev.local.record.audio.RecordingDeletion
 import dev.local.record.domain.RecordingEvent
+import dev.local.record.domain.RecordingStatus
+import java.io.File
+import java.nio.file.Files
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.test.runTest
@@ -79,6 +83,52 @@ class RecordingRepositoryTest {
         db.recordings().insert(old.copy(globalPosition = 0, eventId = "unknown", aggregateVersion = 2, schemaVersion = 99, commandId = "unknown"))
         assertTrue(runCatching { repository.rebuild() }.isFailure)
         assertEquals(previous, repository.all())
+    }
+
+    @Test
+    fun deletionRemovesAudioAndRebuildCannotResurrectIt() = runTest {
+        val directory = Files.createTempDirectory("recording-delete").toFile()
+        try {
+            repository.append("r", 0, "request", requested, 123)
+            val saved = repository.append("r", 1, "saved", RecordingEvent.Saved("r.m4a", 1000), 124)
+            File(directory, "r.m4a").writeText("synthetic test bytes")
+            File(directory, "r.m4a.part").writeText("synthetic partial")
+            val deletion = RecordingDeletion(repository, directory)
+            deletion.delete(saved, 125)
+            deletion.delete(saved, 126)
+            assertTrue(repository.all().isEmpty())
+            assertTrue(directory.listFiles()?.isEmpty() == true)
+            assertEquals(3, db.recordings().events().size)
+            repository.rebuild()
+            assertEquals(RecordingStatus.DELETED, repository.get("r")?.status)
+            assertTrue(repository.all().isEmpty())
+            File(directory, "r.m4a").writeText("simulate exit before file cleanup")
+            deletion.recover()
+            assertTrue(directory.listFiles()?.isEmpty() == true)
+            assertEquals(3, db.recordings().events().size)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun failedCleanupStaysHiddenAndIsReportedForRetry() = runTest {
+        val directory = Files.createTempDirectory("recording-delete-retry").toFile()
+        try {
+            repository.append("r", 0, "request", requested, 123)
+            val saved = repository.append("r", 1, "saved", RecordingEvent.Saved("r.m4a", 1000), 124)
+            val blocked = File(directory, "r.m4a").apply { mkdirs() }
+            val child = File(blocked, "blocker").apply { writeText("synthetic") }
+            val deletion = RecordingDeletion(repository, directory)
+            assertTrue(runCatching { deletion.delete(saved, 125) }.isFailure)
+            assertTrue(repository.all().isEmpty())
+            assertEquals(1, deletion.recover().size)
+            assertTrue(child.delete())
+            assertTrue(deletion.recover().isEmpty())
+            assertTrue(directory.listFiles()?.isEmpty() == true)
+        } finally {
+            directory.deleteRecursively()
+        }
     }
 
     @Test

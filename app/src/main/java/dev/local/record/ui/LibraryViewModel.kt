@@ -12,10 +12,12 @@ import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import dev.local.record.AppGraph
 import dev.local.record.audio.AudioFile
+import dev.local.record.audio.RecordingDeletion
 import dev.local.record.domain.Recording
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -38,6 +40,9 @@ class LibraryViewModel(context: Context, val graph: AppGraph) : ViewModel() {
     val playback = MutableStateFlow(PlaybackState())
     val ready = MutableStateFlow(false)
     val problem = MutableStateFlow<String?>(null)
+    private var playbackJob: Job? = null
+    private var pendingPlaybackId: String? = null
+    private val deletingIds = mutableSetOf<String>()
     private val player = ExoPlayer.Builder(context.applicationContext).build().apply {
         setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_SPEECH).build(), true)
         setHandleAudioBecomingNoisy(true)
@@ -54,7 +59,7 @@ class LibraryViewModel(context: Context, val graph: AppGraph) : ViewModel() {
     init {
         viewModelScope.launch {
             try {
-                graph.awaitRecovery()
+                problem.value = graph.awaitRecovery().firstOrNull()
                 ready.value = true
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -77,7 +82,7 @@ class LibraryViewModel(context: Context, val graph: AppGraph) : ViewModel() {
     }
 
     fun play(recording: Recording) {
-        if (session.value.active) return
+        if (session.value.active || recording.id in deletingIds) return
         if (playback.value.id == recording.id) {
             if (player.isPlaying) {
                 player.pause()
@@ -89,7 +94,9 @@ class LibraryViewModel(context: Context, val graph: AppGraph) : ViewModel() {
         }
         val fileName = recording.fileName ?: return
         val file = File(graph.audioDirectory, fileName)
-        viewModelScope.launch {
+        playbackJob?.cancel()
+        pendingPlaybackId = recording.id
+        playbackJob = viewModelScope.launch {
             val valid = withContext(Dispatchers.IO) { AudioFile.duration(file) != null }
             if (!valid) {
                 playback.value = PlaybackState(id = recording.id, problem = "音频文件缺失或损坏")
@@ -104,6 +111,30 @@ class LibraryViewModel(context: Context, val graph: AppGraph) : ViewModel() {
 
     fun seek(positionMs: Long) {
         player.seekTo(positionMs)
+    }
+
+    fun delete(recording: Recording) {
+        if (!ready.value || session.value.recordingId == recording.id && session.value.active || !deletingIds.add(recording.id)) return
+        viewModelScope.launch {
+            try {
+                if (pendingPlaybackId == recording.id) playbackJob?.cancel()
+                if (playback.value.id == recording.id) {
+                    player.stop()
+                    player.clearMediaItems()
+                    playback.value = PlaybackState()
+                }
+                withContext(Dispatchers.IO) {
+                    RecordingDeletion(graph.repository, graph.audioDirectory).delete(recording, System.currentTimeMillis())
+                }
+                problem.value = null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                problem.value = "删除录音失败：${error.message}"
+            } finally {
+                deletingIds.remove(recording.id)
+            }
+        }
     }
 
     override fun onCleared() {

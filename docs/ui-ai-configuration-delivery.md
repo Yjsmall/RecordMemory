@@ -16,7 +16,7 @@
 | DeepSeek | `https://api.deepseek.com` + `/responses` | 官方中文文档当前列出 `deepseek-flash`、`deepseek-v4-pro`；Bearer API Key；可配置推理强度 |
 | 自定义 Responses | 自填 HTTPS Base URL、`/responses` 和 `/models` 路径 | 精确模型 ID；Bearer 或无鉴权；不推断所有兼容服务都支持相同参数 |
 | 自定义 OpenAI 兼容 | 自填 HTTPS Base URL、`/chat/completions` | 精确文本模型 ID；服务确实提供同步转写时可启用独立 `/audio/transcriptions`，ASR 模型另配 |
-| 豆包语音 | `https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash` | 语音 `model_name=bigmodel`、`Resource ID=volc.bigasr.auc_turbo`；新版 API Key，或旧版 APP ID + Access Token |
+| 豆包语音 | `https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash` | 语音 `model_name=bigmodel`、`Resource ID=volc.bigasr.auc_turbo`；仅新版 API Key；旧配置保留可读，编辑迁移需重填新版密钥 |
 
 DeepSeek 文本预设不默认开放语音转写；豆包语音不作为文本生成连接。默认添加 DeepSeek Responses，可改用其他预设。更换预设或鉴权类型会要求重填凭据，避免将旧凭据沿用到不同服务。保存配置本身不联网。
 
@@ -26,7 +26,7 @@ DeepSeek 文本预设不默认开放语音转写；豆包语音不作为文本�
 
 1. 文本 provider 查询模型列表，验证地址／鉴权／响应格式；模型出现在列表里不证明支持转写或文本生成。
 2. 文本能力的“测试文本模型”在页面说明并确认后调用所选协议，只发送固定合成检查文字，不发送录音、原文或用户提示词。Responses 使用 `input`／`instructions`，Chat Completions 使用 `messages`；都不跟随重定向，设置 token 上限，Responses 明确 `store=false`。只接受完成的可用文本，忽略 reasoning 和工具项，未完成／失败不报告成功。此测试可能消耗服务 token。
-3. 豆包配置只检查本地格式；不伪造模型列表请求或以非识别请求声称语音鉴权成功。真实音频上传、识别与结果事件入库尚未实现。
+3. 豆包不显示连接／配置测试入口；保存时仅校验本地格式，不伪造模型列表请求或以非识别请求声称语音鉴权成功。真实音频上传、识别与结果事件入库尚未实现。
 
 目前读取的豆包极速识别官方文档列出 WAV／MP3／OGG OPUS，没有列出 M4A。后续可用临时上传音频适配格式；原始归档仍保持 M4A，本阶段没有声称已经完成转换或豆包真实识别。标准版 submit/query 与其他新语音协议不在此配置适配器的已实现范围中。
 
