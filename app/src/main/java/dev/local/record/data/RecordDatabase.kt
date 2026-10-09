@@ -100,7 +100,21 @@ interface RecordDao {
     suspend fun clearProjection()
 }
 
-@Database(entities = [EventRow::class, RecordingRow::class, ProjectionCheckpoint::class], version = 1, exportSchema = true)
+@Database(
+    entities = [
+        EventRow::class,
+        RecordingRow::class,
+        ProjectionCheckpoint::class,
+        ContentRow::class,
+        RecordingTextRow::class,
+        AiJobRow::class,
+        OutboxRow::class,
+        MemoryRow::class
+    ],
+    version = 2,
+    exportSchema = true
+)
 abstract class RecordDatabase : RoomDatabase() {
     abstract fun recordings(): RecordDao
+    abstract fun processing(): ProcessingDao
 }

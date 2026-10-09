@@ -119,7 +119,10 @@ fun SettingsHome(state: SettingsUiState, model: SettingsViewModel, onConnection:
             if (index < AiCapability.entries.lastIndex) GroupDivider()
         }
     }
-    Text("AI 功能待接入，当前仅保存配置", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
+    Text("已配置的转写、标题、总结和记忆会在保存后处理。问答仍未接通。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
+    SettingsGroup {
+        ToggleRow("保存后自动处理", "关闭后只在录音详情里手动开始", config.processingMode == dev.local.record.settings.ProcessingMode.AUTO) { model.processingMode(it) }
+    }
     SectionLabel("外观")
     SettingsGroup {
         Choice("主题", config.appearance.label, AppAppearance.entries.map { it.label }) { index -> model.appearance(AppAppearance.entries[index], config.dynamicColors) }
@@ -308,9 +311,9 @@ fun CapabilityEditor(state: SettingsUiState, model: SettingsViewModel) {
     if (binding.capability == AiCapability.ASR) {
         Text(
             if (connection?.protocol == DOUBAO_ASR) {
-                "豆包识别待接入 · M4A 上传格式需适配"
+                "保存后可转写。上传前会把 M4A 转为临时 WAV，原始归档仍是 M4A。"
             } else {
-                "语音转写待接入"
+                "保存后按此模型转写。兼容接口直接上传 M4A。"
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant

@@ -14,6 +14,7 @@ import dev.local.record.AppGraph
 import dev.local.record.audio.AudioFile
 import dev.local.record.audio.RecordingDeletion
 import dev.local.record.domain.Recording
+import dev.local.record.settings.AiCapability
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,9 @@ data class PlaybackState(
 /** Activity-scoped playback survives configuration recreation, including fold/unfold. */
 class LibraryViewModel(context: Context, val graph: AppGraph) : ViewModel() {
     val recordings = graph.repository.recordings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val insights = graph.processing.texts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val jobs = graph.processing.jobs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val memories = graph.processing.memories.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val session = graph.session
     val playback = MutableStateFlow(PlaybackState())
     val ready = MutableStateFlow(false)
@@ -111,6 +115,44 @@ class LibraryViewModel(context: Context, val graph: AppGraph) : ViewModel() {
 
     fun seek(positionMs: Long) {
         player.seekTo(positionMs)
+    }
+
+    fun transcribe(id: String) = ai { graph.processor.request(id, AiCapability.ASR, System.currentTimeMillis()) }
+
+    fun generate(id: String, capability: AiCapability) = ai { graph.processor.request(id, capability, System.currentTimeMillis()) }
+
+    fun saveTranscript(id: String, value: String) = ai { graph.processing.reviseTranscript(id, value, System.currentTimeMillis()) }
+
+    fun saveTitle(id: String, value: String) = ai { graph.processing.reviseTitle(id, value, System.currentTimeMillis()) }
+
+    fun saveSummary(id: String, value: String) = ai { graph.processing.reviseSummary(id, value, System.currentTimeMillis()) }
+
+    fun acceptTitle(id: String) = ai { graph.processing.acceptTitle(id, System.currentTimeMillis()) }
+
+    fun acceptSummary(id: String) = ai { graph.processing.acceptSummary(id, System.currentTimeMillis()) }
+
+    fun confirmMemory(id: String) = ai { graph.processing.confirmMemory(id, System.currentTimeMillis()) }
+
+    fun forgetMemory(id: String) = ai { graph.processing.forgetMemory(id, System.currentTimeMillis()) }
+
+    fun disableMemory(id: String) = ai { graph.processing.disableMemory(id, System.currentTimeMillis()) }
+
+    fun correctMemory(id: String, value: String) = ai { graph.processing.correctMemory(id, value, System.currentTimeMillis()) }
+
+    fun mergeMemory(sourceId: String, targetId: String) = ai { graph.processing.mergeMemory(sourceId, targetId, System.currentTimeMillis()) }
+
+    private fun ai(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { block() }
+                graph.scheduler.kick()
+                problem.value = null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                problem.value = error.message ?: "处理失败"
+            }
+        }
     }
 
     fun delete(recording: Recording) {

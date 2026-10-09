@@ -65,6 +65,9 @@ class MainActivity : ComponentActivity() {
             val ready by model.ready.collectAsStateWithLifecycle()
             val problem by model.problem.collectAsStateWithLifecycle()
             val notify by notificationsAllowed.collectAsStateWithLifecycle()
+            val insights by model.insights.collectAsStateWithLifecycle()
+            val jobs by model.jobs.collectAsStateWithLifecycle()
+            val memories by model.memories.collectAsStateWithLifecycle()
             val settingsState by settingsModel.state.collectAsStateWithLifecycle()
             RecordTheme(
                 appearance = settingsState.configuration?.appearance ?: AppAppearance.SYSTEM,
@@ -82,7 +85,22 @@ class MainActivity : ComponentActivity() {
                     onNotifications = ::requestNotifications,
                     settingsState = settingsState,
                     settingsModel = settingsModel,
-                    onDelete = model::delete
+                    onDelete = model::delete,
+                    insights = insights,
+                    jobs = jobs,
+                    memories = memories,
+                    onTranscribe = model::transcribe,
+                    onGenerate = model::generate,
+                    onSaveTranscript = model::saveTranscript,
+                    onSaveTitle = model::saveTitle,
+                    onSaveSummary = model::saveSummary,
+                    onAcceptTitle = model::acceptTitle,
+                    onAcceptSummary = model::acceptSummary,
+                    onConfirmMemory = model::confirmMemory,
+                    onForgetMemory = model::forgetMemory,
+                    onDisableMemory = model::disableMemory,
+                    onCorrectMemory = model::correctMemory,
+                    onMergeMemory = model::mergeMemory
                 )
             }
         }

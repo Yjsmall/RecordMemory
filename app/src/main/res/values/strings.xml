@@ -1,3 +1,4 @@
 <resources>
-    <string name="widget_description">点击开始录音，录音中点击停止并保存。</string>
+    <string name="widget_name">随声记</string>
+    <string name="widget_description">点击开始录音，再点停止录音。</string>
 </resources>

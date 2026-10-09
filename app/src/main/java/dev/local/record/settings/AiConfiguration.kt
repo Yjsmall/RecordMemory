@@ -33,6 +33,9 @@ enum class ProviderPreset(val label: String) {
 }
 
 @Serializable
+enum class ProcessingMode { AUTO, MANUAL }
+
+@Serializable
 enum class AppAppearance(val label: String) {
     SYSTEM("跟随系统"),
     LIGHT("浅色"),
@@ -93,7 +96,8 @@ data class AiConfiguration(
     val connections: List<AiConnection> = emptyList(),
     val bindings: List<CapabilityBinding> = AiCapability.entries.map { CapabilityBinding(it) },
     val appearance: AppAppearance = AppAppearance.SYSTEM,
-    val dynamicColors: Boolean = false
+    val dynamicColors: Boolean = false,
+    val processingMode: ProcessingMode = ProcessingMode.AUTO
 ) {
     fun binding(capability: AiCapability) = bindings.firstOrNull { it.capability == capability } ?: CapabilityBinding(capability)
 }

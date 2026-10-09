@@ -15,9 +15,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import dagger.hilt.android.AndroidEntryPoint
 import dev.local.record.AppGraph
-import dev.local.record.MainActivity
 import dev.local.record.R
 import dev.local.record.domain.RecordingEvent
+import dev.local.record.domain.RecordingStatus
 import dev.local.record.widget.RecordingWidget
 import java.io.File
 import java.time.ZoneId
@@ -43,12 +43,17 @@ class RecordingService : Service() {
     private var engine: CaptureEngine? = null
     private var capture: Job? = null
     private var lastRefresh = 0L
+    private var islandOperation = 0
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL, "正在录音", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CHANNEL, "正在录音", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                setSound(null, null)
+                enableVibration(false)
+                setShowBadge(false)
+            }
         )
     }
 
@@ -71,10 +76,15 @@ class RecordingService : Service() {
             scope.launch {
                 commands.withLock { begin() }
             }
-        } else if (action == PAUSE || action == STOP) {
+        } else if (action == PAUSE || action == STOP || action == RESUME || action == DISCARD) {
             scope.launch {
                 commands.withLock {
-                    if (action == PAUSE) togglePause() else finishRecording()
+                    when (action) {
+                        PAUSE -> togglePause()
+                        RESUME -> resume()
+                        DISCARD -> discardRecording()
+                        else -> finishRecording()
+                    }
                 }
             }
         } else if (!graph.session.value.active) {
@@ -109,7 +119,7 @@ class RecordingService : Service() {
                         onLevel = { duration, level, silenced ->
                             graph.session.value = graph.session.value.copy(durationMs = duration, level = level, silenced = silenced)
                             val now = android.os.SystemClock.elapsedRealtime()
-                            if (now - lastRefresh >= 5_000) {
+                            if (now - lastRefresh >= 1_000) {
                                 lastRefresh = now
                                 refresh()
                             }
@@ -141,6 +151,37 @@ class RecordingService : Service() {
             }
             graph.session.value = SessionState(phase = SessionPhase.ERROR, message = "无法开始录音：${error.message}")
             shutdown()
+        }
+    }
+
+    private suspend fun resume() {
+        if (graph.session.value.phase != SessionPhase.PAUSED) return
+        togglePause()
+    }
+
+    private suspend fun discardRecording() {
+        val id = graph.session.value.recordingId
+        graph.session.value = graph.session.value.copy(phase = SessionPhase.SAVING, level = 0f)
+        engine?.stop()
+        capture?.join()
+        engine = null
+        capture = null
+        if (id != null) {
+            val current = graph.repository.get(id)
+            if (current != null && current.status in setOf(RecordingStatus.REQUESTED, RecordingStatus.RECORDING, RecordingStatus.PAUSED)) {
+                val failed = graph.repository.append(id, current.version, "$id:discard", RecordingEvent.Failed("已放弃"), System.currentTimeMillis())
+                graph.repository.append(id, failed.version, "$id:discard-delete", RecordingEvent.Deleted, System.currentTimeMillis())
+            }
+            deletePrivateAudio(id)
+        }
+        graph.session.value = SessionState(message = "已放弃这次录音")
+        shutdown()
+    }
+
+    private fun deletePrivateAudio(id: String) {
+        listOf("$id.m4a.part", "$id.m4a").forEach { name ->
+            val file = File(graph.audioDirectory, name)
+            if (file.exists() && file.canonicalFile.parentFile == graph.audioDirectory.canonicalFile) file.delete()
         }
     }
 
@@ -195,7 +236,16 @@ class RecordingService : Service() {
                 RecordingEvent.Interrupted(complete.name, duration, problem)
             }
             graph.repository.append(id, current.version, "$id:finish", fact, System.currentTimeMillis())
-            graph.session.value = SessionState(message = if (problem == null) "已保存录音" else "录音中断，已保存可用音频：$problem")
+            val note = try {
+                val queued = graph.processor.enqueueSaved(id, System.currentTimeMillis())
+                graph.scheduler.kick()
+                if (queued) "已保存录音，正在转写" else "已保存录音"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                "已保存录音。自动处理未开始：${error.message}"
+            }
+            graph.session.value = SessionState(message = if (problem == null) note else "录音中断，已保存可用音频：$problem")
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Exception) {
@@ -222,25 +272,30 @@ class RecordingService : Service() {
 
     private fun notification(): Notification {
         val state = graph.session.value
-        val label = when (state.phase) {
-            SessionPhase.PAUSED -> "已暂停"
-            SessionPhase.STARTING -> "正在启动"
-            SessionPhase.SAVING -> "正在保存"
-            else -> if (state.silenced) "麦克风受限，可能正在录入静音" else "正在录音"
-        }
-        return NotificationCompat.Builder(this, CHANNEL)
+        val duration = formatDuration(state.durationMs)
+        val onIsland = state.phase == SessionPhase.RECORDING || state.phase == SessionPhase.PAUSED
+        val operation = islandOperation
+        if (onIsland && islandOperation == 0) islandOperation = 1
+        val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_mic)
-            .setContentTitle("随声记 · $label")
-            .setContentText(formatDuration(state.durationMs))
-            .setOngoing(true).setOnlyAlertOnce(true)
+            .setContentTitle(if (onIsland) duration else "随声记")
+            .setContentText(duration)
+            .setWhen(System.currentTimeMillis() - state.durationMs)
+            .setUsesChronometer(onIsland && state.phase == SessionPhase.RECORDING)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setCategory(Notification.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
-            .addAction(0, if (state.phase == SessionPhase.PAUSED) "继续" else "暂停", commandPending(this, PAUSE, 1))
-            .addAction(0, "停止并保存", commandPending(this, STOP, 2))
-            .build()
+            .addAction(0, "停止", commandPending(this, STOP, 21))
+            .addAction(0, "恢复", commandPending(this, RESUME, 22))
+            .addAction(0, "删除", commandPending(this, DISCARD, 23))
+        if (onIsland) builder.addExtras(AtomicIsland.extras(this, duration, state.phase == SessionPhase.PAUSED, operation))
+        return builder.build()
     }
 
     private fun shutdown() {
+        islandOperation = 0
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         RecordingWidget.updateAll(this, graph.session.value)
         stopSelf()
@@ -264,7 +319,9 @@ class RecordingService : Service() {
         const val START = "dev.local.record.START"
         const val STOP = "dev.local.record.STOP"
         const val PAUSE = "dev.local.record.PAUSE"
-        private const val CHANNEL = "recording"
+        const val RESUME = "dev.local.record.RESUME"
+        const val DISCARD = "dev.local.record.DISCARD"
+        private const val CHANNEL = "recording-live"
         private const val NOTIFICATION = 100
 
         fun command(context: Context, action: String) {

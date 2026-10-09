@@ -71,6 +71,10 @@ class SettingsRepository(
         }
     }
 
+    suspend fun processingMode(mode: ProcessingMode) {
+        store.updateData { it.copy(configuration = it.configuration.copy(processingMode = mode)) }
+    }
+
     suspend fun appearance(appearance: AppAppearance, dynamicColors: Boolean) {
         store.updateData { it.copy(configuration = it.configuration.copy(appearance = appearance, dynamicColors = dynamicColors)) }
     }

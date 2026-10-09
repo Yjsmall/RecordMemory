@@ -8,14 +8,13 @@ import dev.local.record.domain.evolve
 import dev.local.record.domain.validate
 import java.util.UUID
 import kotlinx.coroutines.flow.map
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
 /** The single business write boundary. Facts and query state commit in one SQLite transaction. */
 class RecordingRepository(private val db: RecordDatabase) {
     private val dao = db.recordings()
-    private val json = Json { classDiscriminator = "type" }
+    private val json = eventJson
     val recordings = dao.observe().map { rows -> rows.map(RecordingRow::domain).filter { it.status != RecordingStatus.DELETED } }
 
     suspend fun all() = dao.all().map(RecordingRow::domain).filter { it.status != RecordingStatus.DELETED }
@@ -52,6 +51,7 @@ class RecordingRepository(private val db: RecordDatabase) {
         )
         dao.project(RecordingRow.from(next))
         dao.checkpoint(ProjectionCheckpoint(position = position))
+        if (fact is RecordingEvent.Deleted) ProcessingRepository(db).onRecordingDeleted(id, recordedAt)
         next
     }
 
@@ -60,7 +60,11 @@ class RecordingRepository(private val db: RecordDatabase) {
         val states = linkedMapOf<String, Recording>()
         val history = dao.events()
         history.forEach { row ->
-            require(row.schemaVersion == 1 && row.aggregateType == "Recording") { "Unsupported event schema" }
+            require(row.schemaVersion == 1) { "Unsupported event schema" }
+            if (row.aggregateType != "Recording") {
+                require(row.aggregateType in setOf("AiJob", "Memory", "RecordingText")) { "Unsupported event schema" }
+                return@forEach
+            }
             val state = states[row.aggregateId] ?: Recording(row.aggregateId)
             check(row.aggregateVersion == state.version + 1) { "Non-contiguous aggregate history" }
             val event = json.decodeFromString(RecordingEvent.serializer(), row.payload)
@@ -70,5 +74,6 @@ class RecordingRepository(private val db: RecordDatabase) {
         dao.clearProjection()
         states.values.forEach { dao.project(RecordingRow.from(it)) }
         dao.checkpoint(ProjectionCheckpoint(position = history.lastOrNull()?.globalPosition ?: 0))
+        ProcessingRepository(db).replay()
     }
 }

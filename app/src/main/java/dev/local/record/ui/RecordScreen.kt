@@ -1,7 +1,6 @@
 package dev.local.record.ui
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,7 +30,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
@@ -66,8 +64,11 @@ import androidx.navigation3.ui.NavDisplay
 import dev.local.record.audio.SessionPhase
 import dev.local.record.audio.SessionState
 import dev.local.record.audio.formatDuration
+import dev.local.record.domain.AiJob
+import dev.local.record.domain.MemoryItem
 import dev.local.record.domain.Recording
 import dev.local.record.domain.RecordingStatus
+import dev.local.record.domain.RecordingText
 import dev.local.record.settings.AiCapability
 import java.time.Instant
 import java.time.ZoneId
@@ -79,6 +80,9 @@ data object Library : NavKey
 
 @Serializable
 data class Detail(val id: String) : NavKey
+
+@Serializable
+data object MemoriesPage : NavKey
 
 @Serializable
 data object SettingsPage : NavKey
@@ -106,7 +110,22 @@ fun RecordScreen(
     onNotifications: () -> Unit,
     settingsState: SettingsUiState = SettingsUiState(),
     settingsModel: SettingsViewModel? = null,
-    onDelete: (Recording) -> Unit = {}
+    onDelete: (Recording) -> Unit = {},
+    insights: List<RecordingText> = emptyList(),
+    jobs: List<AiJob> = emptyList(),
+    memories: List<MemoryItem> = emptyList(),
+    onTranscribe: (String) -> Unit = {},
+    onGenerate: (String, AiCapability) -> Unit = { _, _ -> },
+    onSaveTranscript: (String, String) -> Unit = { _, _ -> },
+    onSaveTitle: (String, String) -> Unit = { _, _ -> },
+    onSaveSummary: (String, String) -> Unit = { _, _ -> },
+    onAcceptTitle: (String) -> Unit = {},
+    onAcceptSummary: (String) -> Unit = {},
+    onConfirmMemory: (String) -> Unit = {},
+    onForgetMemory: (String) -> Unit = {},
+    onDisableMemory: (String) -> Unit = {},
+    onCorrectMemory: (String, String) -> Unit = { _, _ -> },
+    onMergeMemory: (String, String) -> Unit = { _, _ -> }
 ) {
     val backStack = rememberNavBackStack(Library)
     var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -150,11 +169,12 @@ fun RecordScreen(
                     })
                 ) {
                     LibraryPane(
-                        recordings, session, ready, problem, notificationsAllowed,
+                        recordings, insights, session, ready, problem, notificationsAllowed,
                         onStart, onPause, onStop, onNotifications,
                         selectedId = backStack.filterIsInstance<Detail>().lastOrNull()?.id,
                         onDelete = { deleteId = it.id },
                         onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
+                        onMemories = { backStack.add(MemoriesPage) },
                         onSelect = { id ->
                             while (backStack.size > 1) backStack.removeLastOrNull()
                             backStack.add(Detail(id))
@@ -164,6 +184,9 @@ fun RecordScreen(
                 entry<Detail>(metadata = ListDetailSceneStrategy.detailPane()) { detail ->
                     DetailPane(
                         recordings.firstOrNull { it.id == detail.id },
+                        insights.firstOrNull { it.recordingId == detail.id },
+                        jobs.filter { it.recordingId == detail.id },
+                        memories,
                         session,
                         playback,
                         showBack = !wide,
@@ -171,8 +194,29 @@ fun RecordScreen(
                         onPlay = onPlay,
                         onSeek = onSeek,
                         onStop = onStop,
-                        onSettings = settingsModel?.let { { backStack.add(SettingsPage) } }
+                        onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
+                        onTranscribe = onTranscribe,
+                        onGenerate = onGenerate,
+                        onSaveTranscript = onSaveTranscript,
+                        onSaveTitle = onSaveTitle,
+                        onSaveSummary = onSaveSummary,
+                        onAcceptTitle = onAcceptTitle,
+                        onAcceptSummary = onAcceptSummary,
+                        onConfirmMemory = onConfirmMemory,
+                        onForgetMemory = onForgetMemory,
+                        onDisableMemory = onDisableMemory,
+                        onCorrectMemory = onCorrectMemory,
+                        onMergeMemory = onMergeMemory
                     )
+                }
+                entry<MemoriesPage> {
+                    Column(Modifier.fillMaxSize()) {
+                        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { if (backStack.size > 1) backStack.removeLastOrNull() }) { Icon(RecordIcons.Back, "返回录音库") }
+                            Text("记忆", style = MaterialTheme.typography.titleMedium)
+                        }
+                        MemoryLibrary(memories, onConfirmMemory, onForgetMemory, onDisableMemory, onCorrectMemory, onMergeMemory)
+                    }
                 }
                 entry<SettingsPage> {
                     settingsModel?.let { model ->
@@ -244,6 +288,7 @@ fun RecordScreen(
 @Composable
 private fun LibraryPane(
     recordings: List<Recording>,
+    insights: List<RecordingText>,
     session: SessionState,
     ready: Boolean,
     problem: String?,
@@ -255,6 +300,7 @@ private fun LibraryPane(
     selectedId: String?,
     onDelete: (Recording) -> Unit,
     onSettings: (() -> Unit)?,
+    onMemories: () -> Unit,
     onSelect: (String) -> Unit
 ) {
     val scroll = rememberLazyListState()
@@ -265,8 +311,11 @@ private fun LibraryPane(
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("随声记", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f))
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest) {
+                    IconButton(onClick = onMemories, modifier = Modifier.testTag("open-memories")) { Icon(RecordIcons.Spark, "记忆") }
+                }
                 onSettings?.let {
                     Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest) {
                         IconButton(onClick = it, modifier = Modifier.testTag("open-settings")) { Icon(RecordIcons.Settings, "设置") }
@@ -303,7 +352,7 @@ private fun LibraryPane(
                         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                             IconBadge(RecordIcons.Wave)
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(recordingTitle(recording), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(displayTitle(recording, insights.firstOrNull { it.recordingId == recording.id }), style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 Text("${formatDuration(recording.durationMs)} · ${if (recording.status == RecordingStatus.SAVED) "M4A" else statusLabel(recording.status)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Icon(RecordIcons.Next, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -370,6 +419,9 @@ private fun LevelMeter(level: Float, active: Boolean) {
 @Composable
 private fun DetailPane(
     recording: Recording?,
+    insight: RecordingText?,
+    jobs: List<AiJob>,
+    memories: List<MemoryItem>,
     session: SessionState,
     playback: PlaybackState,
     showBack: Boolean,
@@ -377,7 +429,19 @@ private fun DetailPane(
     onPlay: (Recording) -> Unit,
     onSeek: (Long) -> Unit,
     onStop: () -> Unit,
-    onSettings: (() -> Unit)?
+    onSettings: (() -> Unit)?,
+    onTranscribe: (String) -> Unit,
+    onGenerate: (String, AiCapability) -> Unit,
+    onSaveTranscript: (String, String) -> Unit,
+    onSaveTitle: (String, String) -> Unit,
+    onSaveSummary: (String, String) -> Unit,
+    onAcceptTitle: (String) -> Unit,
+    onAcceptSummary: (String) -> Unit,
+    onConfirmMemory: (String) -> Unit,
+    onForgetMemory: (String) -> Unit,
+    onDisableMemory: (String) -> Unit,
+    onCorrectMemory: (String, String) -> Unit,
+    onMergeMemory: (String, String) -> Unit
 ) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp).testTag("recording-detail"),
@@ -392,7 +456,7 @@ private fun DetailPane(
             Text("录音正在加载…")
             return@Column
         }
-        Text(recordingTitle(recording), style = MaterialTheme.typography.headlineMedium)
+        Text(displayTitle(recording, insight), style = MaterialTheme.typography.headlineMedium)
         Text("${recordingDate(recording)} · ${statusLabel(recording.status)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         recording.problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (session.active) {
@@ -430,20 +494,16 @@ private fun DetailPane(
             if (thisPlayback) playback.problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
         Text("M4A · 本机保存", modifier = Modifier.align(Alignment.CenterHorizontally), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        if (onSettings != null) {
-            SettingsGroup {
-                Row(Modifier.fillMaxWidth().clickable(onClick = onSettings).padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    IconBadge(RecordIcons.Spark)
-                    Column(Modifier.weight(1f)) {
-                        Text("AI 服务", style = MaterialTheme.typography.titleMedium)
-                        Text("配置模型 · 功能待接入", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Icon(RecordIcons.Next, null, Modifier.size(18.dp))
-                }
-            }
+        if (recording.fileName != null && !session.active) {
+            InsightSection(
+                recording.id, insight, jobs, memories, onTranscribe, onGenerate, onSaveTranscript, onSaveTitle, onSaveSummary,
+                onAcceptTitle, onAcceptSummary, onConfirmMemory, onForgetMemory, onDisableMemory, onCorrectMemory, onMergeMemory
+            )
         }
     }
 }
+
+fun displayTitle(recording: Recording, insight: RecordingText?): String = insight?.title?.takeIf { it.isNotBlank() } ?: recordingTitle(recording)
 
 fun recordingTitle(recording: Recording): String = runCatching {
     DateTimeFormatter.ofPattern("HH:mm 的录音").withZone(ZoneId.of(recording.zone)).format(Instant.ofEpochMilli(recording.startedAt))

@@ -15,6 +15,7 @@ import dev.local.record.settings.ConnectionCheck
 import dev.local.record.settings.ConnectionChecker
 import dev.local.record.settings.DOUBAO_ASR
 import dev.local.record.settings.PrivateSettings
+import dev.local.record.settings.ProcessingMode
 import dev.local.record.settings.ProviderPreset
 import dev.local.record.settings.SettingsRepository
 import dev.local.record.settings.TextModelChecker
@@ -202,6 +203,8 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
     }
 
     fun appearance(appearance: AppAppearance, dynamic: Boolean) = operation { repository.appearance(appearance, dynamic) }
+
+    fun processingMode(auto: Boolean) = operation { repository.processingMode(if (auto) ProcessingMode.AUTO else ProcessingMode.MANUAL) }
 
     fun export(resolver: ContentResolver, uri: Uri) = operation {
         val content = ConfigurationCodec.export(privateSettings.configuration)
