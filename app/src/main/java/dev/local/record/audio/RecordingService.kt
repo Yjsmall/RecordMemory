@@ -314,6 +314,8 @@ class RecordingService : Service() {
             .setContentIntent(openPending())
             .setWhen(System.currentTimeMillis() - state.durationMs)
             .setUsesChronometer(onIsland && state.phase == SessionPhase.RECORDING)
+            .setRequestPromotedOngoing(onIsland)
+            .setShortCriticalText(if (state.phase == SessionPhase.PAUSED) duration else null)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)

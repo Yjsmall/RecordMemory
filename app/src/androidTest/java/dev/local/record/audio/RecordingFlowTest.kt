@@ -6,8 +6,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.graphics.drawable.Icon
+import android.os.Bundle
 import android.os.Parcel
 import android.os.SystemClock
+import androidx.core.app.NotificationCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
 import androidx.test.core.app.ActivityScenario
@@ -30,6 +33,7 @@ import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -59,23 +63,20 @@ class RecordingFlowTest {
             waitUntil { notifications.activeNotifications.any { it.id == 100 && it.notification.actions?.size == 2 } }
             val live = notifications.activeNotifications.first { it.id == 100 }.notification
             assertNotNull(live.contentIntent)
+            assertTrue("Recording must request the standard Live Update surface", NotificationCompat.isRequestPromotedOngoing(live))
+            assertNull(NotificationCompat.getShortCriticalText(live))
+            if (android.os.Build.VERSION.SDK_INT >= 36) assertTrue(NotificationCompat.hasPromotableCharacteristics(live))
+            android.util.Log.i("RecordingLiveUpdatesTest", NotificationDiagnostics.report(context).lineSequence().filter { it.startsWith("Live Updates") }.joinToString("\n"))
             assertTrue(live.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
             assertEquals("暂停", live.actions[0].title.toString())
             // OEM extras must survive Binder transport and their buttons must control the service.
-            val parcel = Parcel.obtain()
-            val card = try {
-                parcel.writeBundle(AtomicIsland.extras(context, formatDuration(graph.session.value.durationMs), false, 1, live.contentIntent))
-                parcel.setDataPosition(0)
-                requireNotNull(parcel.readBundle(PendingIntent::class.java.classLoader))
-            } finally {
-                parcel.recycle()
-            }
+            val card = binderRoundTrip(AtomicIsland.extras(context, formatDuration(graph.session.value.durationMs), false, 1, live.contentIntent))
             assertEquals(0, card.getInt("notification.superx.operation"))
             assertEquals(4, card.getInt("notification.superx.template"))
             assertEquals(0x111, card.getInt("notification.superx.displays"))
             val island = requireNotNull(card.getBundle("notification.superx.island"))
             assertEquals(4, island.getInt("island.superx.template"))
-            assertNotNull(island.getBundle("island.superx.rightInfo")?.getParcelable<PendingIntent>("island.superx.rightInfo.clickResp"))
+            assertEquals(0, island.getInt("island.superx.islandClick"))
             val capsule = requireNotNull(card.getBundle("notification.superx.capsule"))
             assertEquals(1, capsule.getInt("notification.superx.capsule.state"))
             assertTrue(capsule.getInt("notification.superx.capsule.contentColor") != capsule.getInt("notification.superx.capsule.bgColor"))
@@ -83,8 +84,14 @@ class RecordingFlowTest {
             val base = requireNotNull(card.getBundle("notification.superx.baseInfos"))
 
             @Suppress("DEPRECATION")
-            val atomicStop = requireNotNull(base.getParcelable<PendingIntent>("notification.superx.baseInfos.subInfoClickResp"))
-            live.actions[0].actionIntent.send()
+            val controls = requireNotNull(base.getParcelableArrayList<PendingIntent>("notification.superx.baseInfos.subInfoClickRespList"))
+
+            @Suppress("DEPRECATION")
+            val icons = requireNotNull(base.getParcelableArrayList<Icon>("notification.superx.baseInfos.subImageList"))
+            assertEquals(4, base.getInt("notification.superx.baseInfos.subInfo"))
+            assertEquals(2, controls.size)
+            assertEquals(controls.size, icons.size)
+            controls[0].send()
             waitUntil { graph.session.value.phase == SessionPhase.PAUSED }
             SystemClock.sleep(300)
             val pausedAt = graph.session.value.durationMs
@@ -92,13 +99,23 @@ class RecordingFlowTest {
             assertEquals(pausedAt, graph.session.value.durationMs)
             waitUntil { notifications.activeNotifications.firstOrNull { it.id == 100 }?.notification?.actions?.firstOrNull()?.title == "继续" }
             val paused = notifications.activeNotifications.first { it.id == 100 }.notification
+            assertTrue(NotificationCompat.isRequestPromotedOngoing(paused))
+            assertEquals(formatDuration(pausedAt), NotificationCompat.getShortCriticalText(paused))
             assertTrue(!paused.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
-            paused.actions[0].actionIntent.send()
+            val pausedCard = binderRoundTrip(AtomicIsland.extras(context, formatDuration(pausedAt), true, 2, live.contentIntent))
+            val pausedBase = requireNotNull(pausedCard.getBundle("notification.superx.island")?.getBundle("island.superx.baseInfos"))
+
+            @Suppress("DEPRECATION")
+            val pausedControls = requireNotNull(pausedBase.getParcelableArrayList<PendingIntent>("notification.superx.baseInfos.subInfoClickRespList"))
+            pausedControls[0].send()
             waitUntil { graph.session.value.phase == SessionPhase.RECORDING }
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
             SystemClock.sleep(1_000)
             assertTrue(graph.session.value.durationMs > pausedAt)
-            atomicStop.send()
+            controls[0].send()
+            waitUntil { graph.session.value.phase == SessionPhase.PAUSED }
+            // A previously generated paused card must still save the paused session.
+            pausedControls[1].send()
             waitUntil { !graph.session.value.active }
             val recording = runBlocking { graph.repository.get(id) }
             assertEquals(RecordingStatus.SAVED, recording?.status)
@@ -185,6 +202,17 @@ class RecordingFlowTest {
             }
         } finally {
             scenario.close()
+        }
+    }
+
+    private fun binderRoundTrip(bundle: Bundle): Bundle {
+        val parcel = Parcel.obtain()
+        return try {
+            parcel.writeBundle(bundle)
+            parcel.setDataPosition(0)
+            requireNotNull(parcel.readBundle(PendingIntent::class.java.classLoader))
+        } finally {
+            parcel.recycle()
         }
     }
 

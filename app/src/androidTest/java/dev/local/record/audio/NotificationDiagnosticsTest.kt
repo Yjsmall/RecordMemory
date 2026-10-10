@@ -33,12 +33,15 @@ class NotificationDiagnosticsTest {
         manager.createNotificationChannel(NotificationChannel(channel, "诊断测试", NotificationManager.IMPORTANCE_LOW))
         try {
             val notification = NotificationCompat.Builder(context, channel).setSmallIcon(R.drawable.ic_mic)
-                .setContentTitle("private-recording-title").setContentText("private-recording-body").build()
+                .setContentTitle("private-recording-title").setContentText("private-recording-body")
+                .setOngoing(true).setRequestPromotedOngoing(true).build()
             manager.notify(100, notification)
             val deadline = android.os.SystemClock.elapsedRealtime() + 5_000
             while (manager.activeNotifications.none { it.id == 100 } && android.os.SystemClock.elapsedRealtime() < deadline) android.os.SystemClock.sleep(50)
             val report = NotificationDiagnostics.report(context)
             assertTrue(report.contains("普通录音=true"))
+            assertTrue(report.contains("Live Updates 请求=true"))
+            assertTrue(report.contains("实际提升="))
             assertTrue(report.contains("系统接收通知不等于显示胶囊"))
             assertFalse(report.contains("private-recording-title"))
             assertFalse(report.contains("private-recording-body"))

@@ -41,17 +41,19 @@ internal object AtomicIsland {
 
     fun extras(context: Context, duration: String, paused: Boolean, revision: Int, open: PendingIntent): Bundle {
         val icon = Icon.createWithResource(context, R.drawable.ic_mic_island)
+        val toggleIcon = Icon.createWithResource(context, if (paused) R.drawable.ic_island_resume else R.drawable.ic_island_pause)
+        val saveIcon = Icon.createWithResource(context, R.drawable.ic_island_save)
+        val toggle = RecordingService.commandPending(context, if (paused) RecordingService.RESUME else RecordingService.PAUSE, 22)
         val stop = RecordingService.commandPending(context, RecordingService.STOP, 21)
         val state = if (paused) "已暂停" else "正在录音"
         val base = Bundle().apply {
             putParcelable("notification.superx.baseInfos.icon", icon)
-            putCharSequence("notification.superx.baseInfos.title", "随声记 · $state")
-            putCharSequence("notification.superx.baseInfos.content", duration)
-            putInt("notification.superx.baseInfos.subInfo", 2)
-            putString("notification.superx.baseInfos.subText", "停止保存")
-            putInt("notification.superx.baseInfos.subTextColor", 0xFFFFFFFF.toInt())
-            putInt("notification.superx.baseInfos.subCapsuleBgColor", 0xFF315C49.toInt())
-            putParcelable("notification.superx.baseInfos.subInfoClickResp", stop)
+            putCharSequence("notification.superx.baseInfos.title", duration)
+            putCharSequence("notification.superx.baseInfos.content", state)
+            // Official template 4 supports up to three icons with matching click intents.
+            putInt("notification.superx.baseInfos.subInfo", 4)
+            putParcelableArrayList("notification.superx.baseInfos.subImageList", arrayListOf(toggleIcon, saveIcon))
+            putParcelableArrayList("notification.superx.baseInfos.subInfoClickRespList", arrayListOf(toggle, stop))
         }
         val shortInfos = Bundle().apply {
             putString("notification.superx.shortInfos.coreInfoShort", duration)
@@ -61,12 +63,9 @@ internal object AtomicIsland {
         }
         val left = Bundle().apply {
             putParcelable("island.superx.leftInfo.icon", icon)
-            putCharSequence("island.superx.leftInfo.content", duration)
         }
         val right = Bundle().apply {
-            putParcelable("island.superx.rightInfo.icon", icon)
-            putCharSequence("island.superx.rightInfo.content", if (paused) "暂停" else "录音")
-            putParcelable("island.superx.rightInfo.clickResp", open)
+            putCharSequence("island.superx.rightInfo.content", if (paused) "暂停 $duration" else duration)
         }
         val island = Bundle().apply {
             putInt("island.superx.leftTemplate", 1)
