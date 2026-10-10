@@ -16,7 +16,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Process-owned learning for newly committed answers. It never scans historical turns or tasks.
+ * Process-owned admission for newly committed answers. It never scans historical turns.
+ * The planner persists each admitted request; its authorized outbox can resume after restart.
  * Call [onAnswered] only from the live answer command after its transaction has committed.
  */
 class AutomaticMemoryLearning internal constructor(
@@ -69,10 +70,10 @@ class AutomaticMemoryLearning internal constructor(
         }
     }
 
-    /** Admit a finite current batch. Overflow stays available for explicit manual extraction. */
+    /** Persist every live source; the executor enforces the daily paid-attempt budget. */
     fun onAnswered(turnId: String) {
         synchronized(admitted) {
-            if (!enabled || observer?.isActive != true || turnId in admitted || admitted.size >= 4) return
+            if (!enabled || observer?.isActive != true || turnId in admitted) return
             val job = scope.launch(start = CoroutineStart.LAZY) {
                 try {
                     request(turnId)?.join()

@@ -32,7 +32,7 @@ class AutomaticMemoryLearningTest {
         assertEquals(listOf("current-source"), requests)
     }
 
-    @Test fun currentBatchIsBoundedAndDuplicateCallbacksDoNotOccupySlots() = runTest {
+    @Test fun liveCallbacksPersistEveryDistinctSourceAndLeavePaidBudgetToExecutor() = runTest {
         val enabled = MutableStateFlow(true)
         val attempts = mutableListOf<Pair<String, CompletableJob>>()
         val learning = AutomaticMemoryLearning(enabled, { id -> Job().also { attempts += id to it } }, {}, backgroundScope)
@@ -41,7 +41,7 @@ class AutomaticMemoryLearningTest {
         repeat(8) { learning.onAnswered("same-source") }
         repeat(8) { learning.onAnswered("source-$it") }
         runCurrent()
-        assertEquals(listOf("same-source", "source-0", "source-1", "source-2"), attempts.map { it.first })
+        assertEquals(listOf("same-source") + List(8) { "source-$it" }, attempts.map { it.first })
         attempts.forEach { it.second.complete() }
         runCurrent()
         learning.onAnswered("later-source")

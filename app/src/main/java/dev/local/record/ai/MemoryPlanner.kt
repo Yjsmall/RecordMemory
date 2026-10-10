@@ -95,14 +95,51 @@ class MemoryPlanner(
     private val settings: SettingsRepository,
     private val scope: CoroutineScope,
     private val gateway: AiGateway = AiGateway(),
-    private val timeoutMillis: Long = 120_000
+    private val timeoutMillis: Long = 120_000,
+    private val wake: () -> Unit = {}
 ) {
     private val active = java.util.concurrent.ConcurrentHashMap<String, Job>()
     private val automaticJobs = mutableSetOf<String>()
     private val execution = Mutex()
+    private val draining = Mutex()
 
     init {
         require(timeoutMillis > 0)
+    }
+
+    /** Authorize only the selected completed sources, with at most ten calls and no paid retry. */
+    suspend fun requestHistory(turnIds: List<String>): Int {
+        val selected = turnIds.distinct()
+        require(selected.isNotEmpty() && selected.size <= 10) { "每批请选择1至10条消息" }
+        val configuration = settings.settings.first()
+        val binding = configuration.configuration.binding(AiCapability.MEMORY)
+        val connection = configuration.configuration.connections.firstOrNull { it.id == binding.connectionId }
+        require(connection != null && connection.supports(AiCapability.MEMORY) && binding.model.isNotBlank() && (!connection.bearerAuth || !configuration.apiKeys[connection.id].isNullOrBlank())) { "请在模型与能力中配置记忆提取模型" }
+        val memories = processing.memories()
+        val references = selected.associateWith { turnId ->
+            val turn = requireNotNull(conversations.turn(turnId))
+            selectAssistantMemories(memories, turn.userText).take(10).map { MemoryReference(it.id, it.version) }
+        }
+        val count = plans.requestHistory(selected, connection, binding, references, System.currentTimeMillis())
+        if (count > 0) wakeAfterCommit()
+        return count
+    }
+
+    /** Resume only committed REQUESTED work. An uncertain RUNNING attempt is never retried. */
+    suspend fun drain() = draining.withLock {
+        while (true) {
+            val task = plans.requested().firstOrNull() ?: break
+            val input = plans.input(task)
+            if (input == null) {
+                plans.fail(task.id, "SOURCE_CHANGED", System.currentTimeMillis())
+                continue
+            }
+            if (input.automatic && !settings.settings.first().agent.autoLearning) {
+                plans.cancel(task.id, System.currentTimeMillis())
+                continue
+            }
+            launchTask(task.id, input.automatic).join()
+        }
     }
 
     suspend fun request(turnId: String, automatic: Boolean = false): Job? {
@@ -121,91 +158,108 @@ class MemoryPlanner(
             plans.cancel(task.id, System.currentTimeMillis())
             return null
         }
-        return synchronized(active) {
-            active[task.id]?.takeIf { it.isActive } ?: scope.launch(start = CoroutineStart.LAZY) { execute(task.id, automaticTask) }.also {
-                active[task.id] = it
-                if (automaticTask) automaticJobs.add(task.id)
-                it.start()
-            }
+        val job = launchTask(task.id, automaticTask)
+        wakeAfterCommit()
+        return job
+    }
+
+    private fun wakeAfterCommit() {
+        // A failed WorkManager admission leaves the intent available to the startup scan.
+        runCatching(wake)
+    }
+
+    private fun launchTask(id: String, automatic: Boolean): Job = synchronized(active) {
+        active[id]?.takeIf { it.isActive } ?: scope.launch(start = CoroutineStart.LAZY) { execute(id, automatic) }.also {
+            active[id] = it
+            if (automatic) automaticJobs.add(id)
+            it.start()
         }
     }
 
     private suspend fun execute(id: String, automatic: Boolean) {
         try {
-            withTimeout(timeoutMillis) {
-                coroutineScope {
-                    val owner = kotlinx.coroutines.currentCoroutineContext()[Job]
-                    val watcher = launch {
-                        plans.tasks.collect { tasks ->
-                            if (tasks.firstOrNull { it.id == id }?.status in setOf(MemoryPlanningStatus.FAILED, MemoryPlanningStatus.CANCELLED)) owner?.cancel()
+            execution.withLock {
+                withTimeout(timeoutMillis) {
+                    coroutineScope {
+                        val owner = kotlinx.coroutines.currentCoroutineContext()[Job]
+                        val watcher = launch {
+                            plans.tasks.collect { tasks ->
+                                if (tasks.firstOrNull { it.id == id }?.status in setOf(MemoryPlanningStatus.FAILED, MemoryPlanningStatus.CANCELLED)) owner?.cancel()
+                            }
                         }
-                    }
-                    val authorization = if (automatic) {
-                        launch {
-                            settings.settings.collect { if (!it.agent.autoLearning) owner?.cancel() }
+                        val authorization = if (automatic) {
+                            launch {
+                                settings.settings.collect { if (!it.agent.autoLearning) owner?.cancel() }
+                            }
+                        } else {
+                            null
                         }
-                    } else {
-                        null
-                    }
-                    try {
-                        execution.withLock {
-                            val input = plans.start(id, System.currentTimeMillis()) ?: return@withLock
-                            val configuration = settings.settings.first()
-                            require(configuration.configuration.connections.any { it == input.connection }) { "记忆模型连接已变化" }
-                            val key = configuration.apiKeys[input.connection.id]
-                            require(!input.connection.bearerAuth || !key.isNullOrBlank())
-                            val task = requireNotNull(plans.task(id))
-                            val turn = requireNotNull(conversations.turn(task.turnId))
-                            val memories = input.memories.map { ref -> requireNotNull(processing.memory(ref.id)) }
-                            val data = buildJsonObject {
-                                put("sourceId", input.sourceContentId)
-                                put("sourceText", turn.userText)
-                                put("sourceObservedAt", input.sourceObservedAt)
-                                put("sourceDate", input.sourceObservedAt?.takeIf { input.sourceZoneId != null }?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.of(input.sourceZoneId)).toLocalDate().toString() })
-                                put("sourceZoneId", input.sourceZoneId)
-                                put("registeredPredicates", MemoryPredicate.entries.joinToString { "${it.key}（${it.label}）" })
-                                putJsonArray("existingConfirmedMemories") {
-                                    memories.forEach { memory ->
-                                        addJsonObject {
-                                            put("id", memory.id)
-                                            put("version", memory.version)
-                                            put("type", memory.type.name)
-                                            put("text", memory.text)
-                                            put("fact", memory.fact?.let { Json.encodeToJsonElement(MemoryFact.serializer(), it.copy(sources = emptyList(), zoneId = null)) } ?: kotlinx.serialization.json.JsonNull)
+                        try {
+                            coroutineScope attempt@{
+                                if (automatic && !settings.settings.first().agent.autoLearning) {
+                                    plans.cancel(id, System.currentTimeMillis())
+                                    return@attempt
+                                }
+                                val input = plans.start(id, System.currentTimeMillis()) ?: return@attempt
+                                val configuration = settings.settings.first()
+                                require(configuration.configuration.connections.any { it == input.connection }) { "记忆模型连接已变化" }
+                                val key = configuration.apiKeys[input.connection.id]
+                                require(!input.connection.bearerAuth || !key.isNullOrBlank())
+                                val task = requireNotNull(plans.task(id))
+                                val turn = requireNotNull(conversations.turn(task.turnId))
+                                val memories = input.memories.map { ref -> requireNotNull(processing.memory(ref.id)) }
+                                val data = buildJsonObject {
+                                    put("sourceId", input.sourceContentId)
+                                    put("sourceText", turn.userText)
+                                    put("sourceObservedAt", input.sourceObservedAt)
+                                    put("sourceDate", input.sourceObservedAt?.takeIf { input.sourceZoneId != null }?.let { java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.of(input.sourceZoneId)).toLocalDate().toString() })
+                                    put("sourceZoneId", input.sourceZoneId)
+                                    put("registeredPredicates", MemoryPredicate.entries.joinToString { "${it.key}（${it.label}）" })
+                                    putJsonArray("existingConfirmedMemories") {
+                                        memories.forEach { memory ->
+                                            addJsonObject {
+                                                put("id", memory.id)
+                                                put("version", memory.version)
+                                                put("type", memory.type.name)
+                                                put("text", memory.text)
+                                                put("fact", memory.fact?.let { Json.encodeToJsonElement(MemoryFact.serializer(), it.copy(sources = emptyList(), zoneId = null)) } ?: kotlinx.serialization.json.JsonNull)
+                                            }
                                         }
                                     }
+                                }.toString()
+                                val prompt = input.binding.prompt + "\n" + MEMORY_PLAN_RULES
+                                // Last check before sending source data; commit validates the same snapshot again.
+                                if (!plans.isCurrent(id)) {
+                                    plans.fail(id, "SOURCE_CHANGED", System.currentTimeMillis())
+                                    return@attempt
                                 }
-                            }.toString()
-                            val prompt = input.binding.prompt + "\n" + MEMORY_PLAN_RULES
-                            // Last check before sending source data; commit validates the same snapshot again.
-                            if (!plans.isCurrent(id)) {
-                                plans.fail(id, "SOURCE_CHANGED", System.currentTimeMillis())
-                                return@withLock
-                            }
-                            if (automatic && !settings.settings.first().agent.autoLearning) {
-                                plans.cancel(id, System.currentTimeMillis())
-                                return@withLock
-                            }
-                            currentCoroutineContext().ensureActive()
-                            val output = gateway.converse(input.connection, input.binding.copy(prompt = prompt), key, listOf(AssistantMessage("user", data)))
-                            if (automatic && !settings.settings.first().agent.autoLearning) {
-                                plans.cancel(id, System.currentTimeMillis())
-                                return@withLock
-                            }
-                            currentCoroutineContext().ensureActive()
-                            val items = parseMemoryPlan(output, turn.userText, allowLegacy = false)
-                            settings.withAgentAuthorization({ preferences ->
-                                (!input.automatic || preferences.autoLearning).also { allowed ->
-                                    if (!allowed) throw CancellationException("自动整理授权已关闭")
+                                if (automatic && !settings.settings.first().agent.autoLearning) {
+                                    plans.cancel(id, System.currentTimeMillis())
+                                    return@attempt
                                 }
-                            }) {
                                 currentCoroutineContext().ensureActive()
-                                plans.complete(id, items, System.currentTimeMillis())
+                                val output = gateway.converse(input.connection, input.binding.copy(prompt = prompt), key, listOf(AssistantMessage("user", data)))
+                                if (automatic && !settings.settings.first().agent.autoLearning) {
+                                    plans.cancel(id, System.currentTimeMillis())
+                                    return@attempt
+                                }
+                                currentCoroutineContext().ensureActive()
+                                val items = parseMemoryPlan(output, turn.userText, allowLegacy = false)
+                                var autoConfirm = false
+                                settings.withAgentAuthorization({ preferences ->
+                                    autoConfirm = preferences.autoConfirm
+                                    (!input.automatic || preferences.autoLearning).also { allowed ->
+                                        if (!allowed) throw CancellationException("自动整理授权已关闭")
+                                    }
+                                }) {
+                                    currentCoroutineContext().ensureActive()
+                                    plans.complete(id, items, System.currentTimeMillis(), autoConfirm)
+                                }
                             }
+                        } finally {
+                            watcher.cancel()
+                            authorization?.cancel()
                         }
-                    } finally {
-                        watcher.cancel()
-                        authorization?.cancel()
                     }
                 }
             }

@@ -184,9 +184,14 @@ class ProcessingRepository(private val db: RecordDatabase) {
     suspend fun reviseTranscript(recordingId: String, value: String, now: Long) = db.withTransaction {
         val body = value.trim()
         require(body.isNotBlank()) { "转写不能为空" }
+        val previousContentId = text(recordingId).transcriptContentId
         val contentId = UUID.randomUUID().toString()
         dao.saveContent(ContentRow(contentId, "transcript", body, now))
         commitText(recordingId, TextEvent.TranscriptSet(contentId, TextOrigin.USER.name), "$recordingId:transcript:$contentId", now, body)
+        if (previousContentId != null) {
+            ConversationRepository(db).withdrawDerivedContent(withdrawnSourceContentIds = setOf(previousContentId), now = now)
+            dao.deleteContent(previousContentId)
+        }
         MemoryKnowledgeRepository(db).withdrawSources(now) { it.recordingId == recordingId && it.contentId != contentId }
         dao.memoriesFor(recordingId).map(MemoryRow::domain).filter { it.visible && it.sourceContentId != contentId }.forEach { item ->
             commitMemory(item.id, MemoryEvent.Invalidated(memoryFingerprint(item.text)), "${item.id}:transcript-revised:$contentId", now, null, null)
@@ -277,6 +282,10 @@ class ProcessingRepository(private val db: RecordDatabase) {
     }
 
     suspend fun onRecordingDeleted(recordingId: String, now: Long) = db.withTransaction {
+        val sourceIds = events.events().filter { it.aggregateType == "RecordingText" && it.correlationId == recordingId }.mapNotNull {
+            eventJson.parseToJsonElement(it.payload).jsonObject["contentId"]?.jsonPrimitive?.content
+        }.toSet()
+        ConversationRepository(db).withdrawDerivedContent(withdrawnSourceContentIds = sourceIds, now = now)
         MemoryKnowledgeRepository(db).withdrawSources(now) { it.recordingId == recordingId }
         MemoryPlanningRepository(db).invalidateSnapshots(now)
         cancelOpen(recordingId, setOf("ASR", "TITLE", "SUMMARY", "MEMORY"), now)
@@ -362,9 +371,15 @@ class ProcessingRepository(private val db: RecordDatabase) {
     internal suspend fun terminalMemory(id: String, now: Long, name: String, event: (String) -> MemoryEvent) = db.withTransaction {
         val current = requireNotNull(memory(id)) { "找不到记忆" }
         if (!current.visible && current.status != MemoryStatus.SUPERSEDED) return@withTransaction
-        commitMemory(id, event(memoryFingerprint(current.text)), "$id:$name", now, null, null)
+        val sourceIds = (current.fact?.sources.orEmpty().map { it.contentId } + current.sourceContentId).filter { it.isNotBlank() }.distinct()
+        val terminal = when (val fact = event(memoryFingerprint(current.text))) {
+            is MemoryEvent.Forgotten -> fact.copy(sourceContentIds = sourceIds)
+            is MemoryEvent.Invalidated -> fact.copy(sourceContentIds = sourceIds)
+            else -> fact
+        }
+        commitMemory(id, terminal, "$id:$name", now, null, null)
         purgeHistoryContent(current.sourceRecordingId, memoryId = id)
-        ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(id), deletedTurnIds = current.fact?.sources.orEmpty().map { it.turnId }.filter { it.isNotBlank() }.toSet(), now = now)
+        ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(id), deletedTurnIds = current.fact?.sources.orEmpty().map { it.turnId }.filter { it.isNotBlank() }.toSet(), withdrawnSourceContentIds = sourceIds.toSet(), now = now)
         MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 

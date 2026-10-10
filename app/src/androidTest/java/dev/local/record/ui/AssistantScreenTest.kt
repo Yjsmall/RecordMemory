@@ -118,7 +118,7 @@ class AssistantScreenTest {
         compose.onNodeWithText("停止整理").performScrollTo().performClick()
         assertEquals("plan", planCancelled)
         compose.runOnIdle { state.value = state.value.copy(memoryTasks = listOf(MemoryPlanningTask("plan", turnId = "t", status = MemoryPlanningStatus.FAILED, failure = "SOURCE_CHANGED"))) }
-        compose.onNodeWithText("来源或记忆已变化，旧整理结果已失效").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("来源或记忆已变化，请重新选择").performScrollTo().assertIsDisplayed()
     }
 
     @Test fun confirmedMemoryOverviewExcludesCandidatesAndForgottenFacts() {

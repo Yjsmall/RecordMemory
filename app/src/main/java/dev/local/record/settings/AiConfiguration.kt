@@ -112,6 +112,7 @@ data class AssistantPreferences(
     val soul: String? = null,
     val skillStates: Map<String, Boolean> = emptyMap(),
     val autoLearning: Boolean = false,
+    val autoConfirm: Boolean = false,
     val toolChecks: Map<String, String> = emptyMap()
 )
 

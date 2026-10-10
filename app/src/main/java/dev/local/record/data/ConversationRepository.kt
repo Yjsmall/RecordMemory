@@ -29,8 +29,15 @@ class ConversationRepository(private val db: RecordDatabase) {
     suspend fun context(id: String): AssistantContext? = content.content(id)?.body?.let { eventJson.decodeFromString<AssistantContext>(it) }
     suspend fun memoryRevision(): Long = events.memoryRevision()
 
-    /** Only retained evidence attached to the caller's validated confirmed memory is readable. */
-    suspend fun sourceText(id: String): String? = content.content(id)?.body
+    /** Reads current unmasked source versions; corrections must belong to a current confirmed memory. */
+    suspend fun sourceText(id: String): String? = db.withTransaction {
+        HistorySearchRepository(db).read(id)?.text ?: content.memories().map(MemoryRow::domain).firstOrNull { memory ->
+            memory.currentAt(System.currentTimeMillis()) && memory.fact?.sources?.any { it.contentId == id && it.origin == "USER_CORRECTION" } == true
+        }?.let { content.content(id)?.body?.let { eventJson.decodeFromString<MemoryBody>(it).text } }
+    }
+
+    suspend fun searchSources(query: dev.local.record.domain.HistoryQuery) = HistorySearchRepository(db).search(query)
+    suspend fun readSource(id: String) = HistorySearchRepository(db).read(id)
 
     suspend fun create(id: String, now: Long) = db.withTransaction {
         val existing = dao.conversation(id)?.domain()
@@ -84,7 +91,7 @@ class ConversationRepository(private val db: RecordDatabase) {
         memory?.version == reference.version && memory.visible && (memory.fact?.effectiveAt(System.currentTimeMillis()) != false)
     } && snapshot.historyTurnIds.all { turn(it)?.status == TurnStatus.ANSWERED } &&
         (snapshot.memoryRevision == null || snapshot.memoryRevision == events.memoryRevision()) &&
-        snapshot.sourceContentIds.all { content.content(it) != null }
+        snapshot.sourceContentIds.all { sourceText(it) != null }
 
     /** Tool receipt and newly used dependencies are committed together before returning to the model. */
     suspend fun completeTool(id: String, attempt: Int, callId: String, receipt: String, memories: List<dev.local.record.domain.MemoryReference>, sourceContentIds: List<String>, now: Long): Boolean = db.withTransaction {
@@ -155,7 +162,7 @@ class ConversationRepository(private val db: RecordDatabase) {
     }
 
     /** Removes every historic derived reply/context, retaining user messages under their own scope. */
-    suspend fun withdrawDerivedContent(memoryIds: Set<String> = emptySet(), deletedTurnIds: Set<String> = emptySet(), now: Long) = db.withTransaction {
+    suspend fun withdrawDerivedContent(memoryIds: Set<String> = emptySet(), deletedTurnIds: Set<String> = emptySet(), withdrawnSourceContentIds: Set<String> = emptySet(), now: Long) = db.withTransaction {
         val affected = deletedTurnIds.toMutableSet()
         affected.addAll(content.memories().filter { it.id in memoryIds }.flatMap { listOf(it.sourceTurnId) + it.domain().fact?.sources.orEmpty().map { source -> source.turnId } }.filter { it.isNotBlank() })
         val history = events.events().filter { it.aggregateType == "AssistantTurn" }
@@ -163,10 +170,18 @@ class ConversationRepository(private val db: RecordDatabase) {
             val id = eventJson.parseToJsonElement(row.payload).jsonObject["contextContentId"]?.jsonPrimitive?.content
             id?.let { context(it) }?.let { row.aggregateId to it }
         }
+        val withdrawnBodies = withdrawnSourceContentIds.toMutableSet()
+        val replyIds = history.groupBy { it.aggregateId }.mapValues { (_, rows) ->
+            rows.mapNotNull { eventJson.parseToJsonElement(it.payload).jsonObject["replyContentId"]?.jsonPrimitive?.content }
+        }
+        history.filter { it.aggregateId in deletedTurnIds }.forEach { row ->
+            eventJson.parseToJsonElement(row.payload).jsonObject["userContentId"]?.jsonPrimitive?.content?.let(withdrawnBodies::add)
+        }
         do {
             val before = affected.size
+            affected.forEach { withdrawnBodies.addAll(replyIds[it].orEmpty()) }
             snapshots.forEach { (turnId, snapshot) ->
-                if ((snapshot.memories + snapshot.historyMemories).any { it.id in memoryIds } || snapshot.historyTurnIds.any { it in affected }) affected.add(turnId)
+                if ((snapshot.memories + snapshot.historyMemories).any { it.id in memoryIds } || snapshot.historyTurnIds.any { it in affected } || snapshot.sourceContentIds.any { it in withdrawnBodies }) affected.add(turnId)
             }
         } while (affected.size != before)
         affected.forEach { id ->

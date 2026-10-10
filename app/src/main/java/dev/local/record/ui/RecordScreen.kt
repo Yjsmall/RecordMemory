@@ -91,6 +91,9 @@ data object MemoriesPage : NavKey
 data class AssistantPage(val conversationId: String? = null) : NavKey
 
 @Serializable
+data object HistoryLearningPage : NavKey
+
+@Serializable
 data object SettingsPage : NavKey
 
 @Serializable
@@ -186,6 +189,7 @@ fun RecordScreen(
                         onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
                         onMemories = { backStack.add(MemoriesPage) },
                         onAssistant = { backStack.add(AssistantPage()) },
+                        onSearch = { backStack.add(HistoryLearningPage) },
                         onSelect = { id ->
                             while (backStack.size > 1) backStack.removeLastOrNull()
                             backStack.add(Detail(id))
@@ -240,7 +244,7 @@ fun RecordScreen(
                     val model = assistantModel
                     if (model != null) {
                         val assistantState by model.state.collectAsStateWithLifecycle()
-                        LaunchedEffect(page.conversationId) { page.conversationId?.let(model::select) }
+                        LaunchedEffect(page.conversationId) { page.conversationId?.takeIf { it != model.state.value.conversationId }?.let(model::select) }
                         AssistantScreen(
                             assistantState, session, { backStack.removeLastOrNull() }, model::draft, model::send, model::retry, model::cancel,
                             model::newConversation, model::select, model::deleteConversation, model::remember, onConfirmMemory, onForgetMemory,
@@ -250,7 +254,29 @@ fun RecordScreen(
                             }, onPause, onStop, model::planMemory, model::cancelMemoryPlanning, {
                                 settingsModel?.editBinding(AiCapability.MEMORY)
                                 backStack.add(CapabilityPage(AiCapability.MEMORY))
-                            }
+                            }, onHistorySearch = { backStack.add(HistoryLearningPage) }
+                        )
+                    }
+                }
+                entry<HistoryLearningPage> {
+                    assistantModel?.let { model ->
+                        val historyState by model.state.collectAsStateWithLifecycle()
+                        HistoryLearningScreen(
+                            historyState,
+                            onBack = { backStack.removeLastOrNull() },
+                            onQuery = model::updateHistory,
+                            onSearch = model::searchHistory,
+                            onSelect = model::selectHistory,
+                            onPlan = model::planHistory,
+                            onOpenSource = { contentId ->
+                                model.openHistorySource(contentId, { conversationId ->
+                                    backStack.add(AssistantPage(conversationId))
+                                }, { recordingId ->
+                                    backStack.add(Detail(recordingId))
+                                })
+                            },
+                            onMemories = { backStack.add(MemoriesPage) },
+                            onCancelTask = model::cancelMemoryPlanning
                         )
                     }
                 }
@@ -340,6 +366,7 @@ private fun LibraryPane(
     onSettings: (() -> Unit)?,
     onMemories: () -> Unit,
     onAssistant: () -> Unit,
+    onSearch: () -> Unit,
     onSelect: (String) -> Unit
 ) {
     val scroll = rememberLazyListState()
@@ -363,6 +390,9 @@ private fun LibraryPane(
             }
         }
         item { RecordingControls(session, ready, onStart, onPause, onStop) }
+        item {
+            TextButton(onClick = onSearch, modifier = Modifier.testTag("library-history-search")) { Text("搜索聊天与录音原文 · 最近学习") }
+        }
         item {
             Surface(onClick = onAssistant, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth().testTag("open-assistant")) {
                 Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {

@@ -4,6 +4,7 @@ import dev.local.record.agent.AgentConfigurationSnapshot
 import dev.local.record.agent.BuiltInAgentCatalog
 import dev.local.record.data.ConversationRepository
 import dev.local.record.data.ProcessingRepository
+import dev.local.record.domain.HistoryQuery
 import dev.local.record.domain.MemoryReference
 import dev.local.record.domain.currentAt
 import dev.local.record.domain.personalMemoryProfile
@@ -30,7 +31,8 @@ internal class AgentTools(
         definition("get_personal_profile", "读取少量当前已确认的个人画像", emptyMap()),
         definition("search_memories", "按关键词及可选主体／谓词／项目范围搜索当前已确认记忆，无匹配返回空", mapOf("query" to "关键词", "subject" to "主体，可选", "predicate" to "事实谓词，可选", "scope" to "项目范围，可选"), listOf("query")),
         definition("get_memory_sources", "读取已确认记忆的保留证据片段", mapOf("id" to "记忆ID"), listOf("id")),
-        definition("search_local_sources", "搜索当前已确认记忆所关联的本机原文证据；不读取无关历史", mapOf("query" to "证据关键词"), listOf("query")),
+        definition("search_local_sources", "检索本机保留的聊天与当前录音转写，返回有限原文片段", mapOf("query" to "关键词，可为空", "fromDate" to "起始日期 YYYY-MM-DD，可选", "throughDate" to "结束日期 YYYY-MM-DD，可选，包含当天", "project" to "明确项目名称，可选")),
+        definition("read_local_source", "按不可变来源ID读取当前有效的有限原文片段", mapOf("id" to "来源正文ID"), listOf("id")),
         definition("load_skill", "按ID加载已启用且本轮可用的内置技能", mapOf("id" to "技能ID"), listOf("id")),
         definition("read_skill_resource", "读取已加载技能登记的参考资料", mapOf("id" to "技能ID", "path" to "相对参考资料名称"), listOf("id", "path"))
     ).filter { catalog != null || it.name !in setOf("load_skill", "read_skill_resource") }
@@ -43,6 +45,33 @@ internal class AgentTools(
         val required = definition.parameters.getValue("required") as JsonArray
         require(required.all { call.arguments[it.jsonPrimitive.content]?.jsonPrimitive?.content?.isNotBlank() == true }) { "工具缺少必要参数" }
         fun arg(key: String) = call.arguments[key]?.jsonPrimitive?.content.orEmpty()
+        if (call.name in setOf("search_local_sources", "read_local_source")) {
+            val hits = if (call.name == "read_local_source") listOfNotNull(conversations.readSource(arg("id"))) else conversations.searchSources(HistoryQuery(arg("query"), arg("fromDate"), arg("throughDate"), arg("project")))
+            val rows = mutableListOf<JsonObject>()
+            val ids = mutableListOf<String>()
+            hits.forEach { hit ->
+                val row = buildJsonObject {
+                    put("sourceId", hit.contentId)
+                    put("ownerId", hit.ownerId)
+                    put("origin", hit.origin)
+                    put("observedAt", hit.observedAt)
+                    put("zoneId", hit.zoneId)
+                    put("project", hit.project)
+                    put("text", hit.text.take(if (call.name == "read_local_source") 1_200 else 300))
+                }
+                if (JsonArray(rows + row).toString().length <= 1_800) {
+                    rows += row
+                    ids += hit.contentId
+                }
+            }
+            return AgentReadResult(
+                buildJsonObject {
+                    put("dataOnly", true)
+                    put("items", JsonArray(rows))
+                }.toString(),
+                sources = ids
+            )
+        }
         if (call.name in setOf("load_skill", "read_skill_resource")) {
             val id = arg("id")
             require(snapshot?.skills?.any { it.id == id } == true) { "此技能不在本轮配置中" }
@@ -79,7 +108,7 @@ internal class AgentTools(
             val sourceMode = call.name in setOf("get_memory_sources", "search_local_sources")
             val available = if (sourceMode) {
                 memory.fact?.sources.orEmpty().filter { source ->
-                    conversations.sourceText(source.contentId)?.let { body -> source.start >= 0 && source.end <= body.length && body.substring(source.start, source.end) == source.evidence } == true
+                    conversations.sourceText(source.contentId)?.let { body -> source.start >= 0 && source.start < source.end && source.end <= body.length && body.substring(source.start, source.end) == source.evidence } == true
                 }
             } else {
                 emptyList()
@@ -102,7 +131,7 @@ internal class AgentTools(
                             }
                         )
                     )
-                    if (available.isEmpty()) put("retainedEvidence", memory.evidence.take(500))
+                    if (available.isEmpty() && memory.fact == null && memory.evidence.isNotBlank() && conversations.sourceText(memory.sourceContentId)?.contains(memory.evidence) == true) put("retainedEvidence", memory.evidence.take(500))
                 } else {
                     put("text", memory.text)
                     memory.fact?.let { fact ->

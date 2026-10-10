@@ -107,6 +107,12 @@ class SettingsRepository(
         }
     }
 
+    suspend fun setAutoConfirm(enabled: Boolean) {
+        agentAuthorization.withLock {
+            store.updateData { it.copy(agent = it.agent.copy(autoConfirm = enabled)) }
+        }
+    }
+
     /** Serializes revocation with a final business commit using the latest preferences. */
     suspend fun <T> withAgentAuthorization(check: (AssistantPreferences) -> Boolean, block: suspend () -> T): T =
         agentAuthorization.withLock {

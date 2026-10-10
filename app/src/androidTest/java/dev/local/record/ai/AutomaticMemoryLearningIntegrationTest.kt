@@ -56,6 +56,50 @@ class AutomaticMemoryLearningIntegrationTest {
         return MockResponse().setBody("""{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":$text}]}]}""")
     }
 
+    @Test fun explicitHistoryResumesCommittedOutboxWithLearningDisabledAndNoDuplicateCalls() = runBlocking {
+        val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
+        val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()
+        val clientTls = HandshakeCertificates.Builder().addTrustedCertificate(certificate.certificate).build()
+        MockWebServer().use { server ->
+            server.useHttps(serverTls.sslSocketFactory(), false)
+            server.start()
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val id = UUID.randomUUID().toString()
+            val settings = SettingsRepository(context, "history-memory-$id.bin", "history-memory-$id", scope)
+            val db = Room.inMemoryDatabaseBuilder(context, RecordDatabase::class.java).build()
+            try {
+                val connection = AiConnection("memory", protocol = RESPONSES, baseUrl = server.url("/v1").toString().trimEnd('/'))
+                val binding = CapabilityBinding(AiCapability.MEMORY, connection.id, "fixed-memory")
+                settings.saveConnection(connection, "synthetic-key")
+                settings.saveBinding(binding)
+                val conversations = ConversationRepository(db)
+                val plans = MemoryPlanningRepository(db)
+                val processing = ProcessingRepository(db)
+                val gateway = AiGateway { (URL(it).openConnection() as HttpsURLConnection).apply { sslSocketFactory = clientTls.sslSocketFactory() } }
+                answered(conversations, "first")
+                answered(conversations, "second")
+                // Simulate a process exit after the transaction but before the wake callback.
+                assertEquals(2, plans.requestHistory(listOf("first", "second"), connection, binding, emptyMap(), 5))
+                plans.recoverInterrupted(6)
+                settings.saveBinding(binding.copy(model = "new-default-memory"))
+                server.enqueue(response())
+                server.enqueue(response())
+                val planner = MemoryPlanner(plans, conversations, processing, settings, scope, gateway)
+                planner.drain()
+                assertEquals(2, server.requestCount)
+                assertTrue(plans.tasks.first().all { it.status == MemoryPlanningStatus.COMPLETED })
+                assertTrue(server.takeRequest(3, TimeUnit.SECONDS)?.body?.readUtf8()?.contains("fixed-memory") == true)
+                assertEquals(0, planner.requestHistory(listOf("second", "first")))
+                planner.drain()
+                assertEquals(2, server.requestCount)
+            } finally {
+                scope.coroutineContext[Job]?.cancelAndJoin()
+                db.close()
+            }
+        }
+    }
+
     @Test fun optInProcessesOnlyLiveCallbacksOnceAndRebuildCannotUploadHistory() = runBlocking {
         val certificate = HeldCertificate.Builder().commonName("localhost").addSubjectAlternativeName("localhost").build()
         val serverTls = HandshakeCertificates.Builder().heldCertificate(certificate).build()

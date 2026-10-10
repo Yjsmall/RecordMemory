@@ -62,6 +62,7 @@ import dev.local.record.domain.changeLabel
 import dev.local.record.domain.confirmable
 import dev.local.record.domain.currentAt
 import dev.local.record.domain.personalMemoryProfile
+import dev.local.record.domain.planningFailureLabel
 
 /** Parent owns safeDrawing (including IME); the composer stays outside the scrolling messages. */
 @Composable
@@ -85,7 +86,8 @@ internal fun AssistantScreen(
     onStop: () -> Unit,
     onPlanMemory: (String) -> Unit = {},
     onCancelMemoryPlanning: (String) -> Unit = {},
-    onConfigureMemory: () -> Unit = {}
+    onConfigureMemory: () -> Unit = {},
+    onHistorySearch: () -> Unit = {}
 ) {
     var menu by remember { mutableStateOf(false) }
     var history by rememberSaveable { mutableStateOf(false) }
@@ -95,8 +97,11 @@ internal fun AssistantScreen(
     var profile by rememberSaveable { mutableStateOf(false) }
     val list = rememberLazyListState()
     val turns = state.turns
-    LaunchedEffect(state.conversationId, turns.size, turns.lastOrNull()?.status) {
-        if (turns.isNotEmpty()) list.animateScrollToItem(turns.lastIndex)
+    LaunchedEffect(state.conversationId, state.focusedTurnId, turns.size, turns.lastOrNull()?.status) {
+        if (turns.isNotEmpty()) {
+            val sourceIndex = turns.indexOfFirst { it.id == state.focusedTurnId }
+            list.animateScrollToItem(if (sourceIndex >= 0) sourceIndex else turns.lastIndex)
+        }
     }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("assistant-screen"), contentAlignment = Alignment.TopCenter) {
         val compact = maxHeight < 420.dp
@@ -118,6 +123,10 @@ internal fun AssistantScreen(
                         DropdownMenuItem(text = { Text("历史对话") }, onClick = {
                             menu = false
                             history = true
+                        })
+                        DropdownMenuItem(text = { Text("历史与录音检索 · 最近学习") }, modifier = Modifier.testTag("open-history-learning"), onClick = {
+                            menu = false
+                            onHistorySearch()
                         })
                         DropdownMenuItem(text = { Text("对话模型") }, onClick = {
                             menu = false
@@ -317,15 +326,9 @@ private fun MemoryPlanningActions(task: MemoryPlanningTask?, enabled: Boolean, c
 internal fun memoryPlanningLabel(task: MemoryPlanningTask): String = when (task.status) {
     MemoryPlanningStatus.REQUESTED -> "记忆整理已排队"
     MemoryPlanningStatus.RUNNING -> "正在整理记忆"
-    MemoryPlanningStatus.COMPLETED -> if (task.candidateCount == 0) "整理完成，没有新增候选" else "整理完成 · 新增 ${task.candidateCount} 条候选"
+    MemoryPlanningStatus.COMPLETED -> if (task.candidateCount == 0) "整理完成，没有新增记忆" else "整理完成 · 新增 ${task.candidateCount} 项记忆"
     MemoryPlanningStatus.CANCELLED -> "整理已停止，可手动重试"
-    MemoryPlanningStatus.FAILED -> when (task.failure) {
-        "INTERRUPTED" -> "上次整理中断，可手动重试"
-        "SOURCE_CHANGED" -> "来源或记忆已变化，旧整理结果已失效"
-        "NETWORK" -> "记忆整理连接失败，可手动重试"
-        "TIMEOUT" -> "记忆整理超时，可手动重试"
-        else -> "记忆整理未完成，请检查模型与格式"
-    }
+    MemoryPlanningStatus.FAILED -> planningFailureLabel(task.failure)
 }
 
 @Composable

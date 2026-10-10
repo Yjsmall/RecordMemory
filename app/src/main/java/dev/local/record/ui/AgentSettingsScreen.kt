@@ -153,13 +153,23 @@ private fun MemoryModeSettings(state: SettingsUiState, model: SettingsViewModel,
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f)) {
                     Text("自动整理候选", style = MaterialTheme.typography.titleMedium)
-                    Text("回答完成后，使用独立记忆模型整理有限对话；候选仍需你审核，不自动确认为事实。", style = MaterialTheme.typography.bodySmall)
+                    Text("回答完成后，使用独立记忆模型整理有限对话。默认产生待审核候选。", style = MaterialTheme.typography.bodySmall)
                 }
                 Switch(state.agentPreferences.autoLearning, model::setAutoLearning, enabled = !state.busy && (configured || state.agentPreferences.autoLearning), modifier = Modifier.testTag("agent-auto-learning"))
             }
             Text(if (configured) "记忆模型：${connection?.name} · ${memory.model}" else "请先配置记忆提取模型与所需密钥，普通聊天与手动记住仍可使用。", style = MaterialTheme.typography.bodySmall)
-            Text("开启会发送有限对话文本到该服务并产生模型费用。关闭会停止自动整理；待确认的候选可继续审核。", style = MaterialTheme.typography.bodySmall)
+            Text("开启会发送对话文本并产生模型费用。每天最多 20 次，每条最多 1 次；中断不会自动付费重试。关闭会停止自动整理，历史批次可在助手的检索页单独授权。", style = MaterialTheme.typography.bodySmall)
             TextButton(onClick = { onCapability(AiCapability.MEMORY) }, enabled = !state.busy) { Text("配置记忆模型") }
+        }
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("自动保存普通事实", style = MaterialTheme.typography.titleMedium)
+                Text("仅保存通过严格规则的完整、直接偏好或普通项目陈述。敏感信息、冲突、替代与不明确内容仍需审核。最近学习中可查看结果和纠正。", style = MaterialTheme.typography.bodySmall)
+                Text("默认关闭。自动保存范围较窄，其他内容会继续作为候选供你审核。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(state.agentPreferences.autoConfirm, model::setAutoConfirm, enabled = !state.busy && (configured || state.agentPreferences.autoConfirm), modifier = Modifier.testTag("agent-auto-confirm"))
         }
     }
     ToolCapabilityStatus(state)

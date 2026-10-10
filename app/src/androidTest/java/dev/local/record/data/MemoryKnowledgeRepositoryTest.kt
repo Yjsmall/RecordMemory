@@ -117,7 +117,11 @@ class MemoryKnowledgeRepositoryTest {
         processing.forgetMemory(old.id, 30)
         assertEquals("我 · 咖啡习惯", processing.memory(old.id)?.suppressionLabel)
         answered("again", "喝咖啡是我的日常习惯")
-        assertNull(plan("again", MemoryDraft(MemoryKind.PREFERENCE, "每天都喝咖啡", "喝咖啡是我的日常习惯", coffee)))
+        val maskedSource = requireNotNull(conversations.turn("again")).userContentId
+        assertNull(HistorySearchRepository(db).read(maskedSource))
+        val taskCount = db.memoryPlanning().all().size
+        assertTrue(runCatching { plans.request("again", connection, binding, emptyList(), 31) }.isFailure)
+        assertEquals(taskCount, db.memoryPlanning().all().size)
         assertTrue(personalMemoryProfile(processing.memories()).items.isEmpty())
         RecordingRepository(db).rebuild()
         assertEquals(coffee.key, processing.memory(old.id)?.suppressionKey)
@@ -213,17 +217,25 @@ class MemoryKnowledgeRepositoryTest {
         assertNull(db.processing().content(remaining.contentId))
     }
 
-    @Test fun otherSubjectCannotBecomeSelfAndForgettingDoesNotSuppressMothersFacts() = fixture {
+    @Test fun forgottenScopeMasksWholeMotherSourceWhileRelearningPreservesSubjectValidation() = fixture {
         val old = initial()
         processing.forgetMemory(old.id, 30)
         answered("mother", "我妈妈喜欢咖啡")
-        val task = plans.request("mother", connection, binding, emptyList(), 31)
-        plans.start(task.id, 32)
+        assertNull(HistorySearchRepository(db).read(requireNotNull(conversations.turn("mother")).userContentId))
+        val taskCount = db.memoryPlanning().all().size
+        assertTrue(runCatching { plans.request("mother", connection, binding, emptyList(), 31) }.isFailure)
+        assertEquals(taskCount, db.memoryPlanning().all().size)
+        // Whole-source privacy protection is conservative; semantic suppression stays subject-specific.
+        assertFalse(processing.memories().any { it.suppressionKey == coffee.copy(subject = "妈妈").key })
+        processing.allowMemoryRelearning(old.id, 32)
+        answered("mother-authorized", "我妈妈喜欢咖啡")
+        val task = plans.request("mother-authorized", connection, binding, emptyList(), 33)
+        plans.start(task.id, 34)
         val wrong = MemoryDraft(MemoryKind.PREFERENCE, "我喜欢咖啡", "我妈妈喜欢咖啡", coffee)
-        assertTrue(runCatching { plans.complete(task.id, listOf(wrong), 33) }.isFailure)
-        assertTrue(plans.complete(task.id, listOf(wrong.copy(text = "妈妈喜欢咖啡", fact = coffee.copy(subject = "妈妈"))), 34))
+        assertTrue(runCatching { plans.complete(task.id, listOf(wrong), 35) }.isFailure)
+        assertTrue(plans.complete(task.id, listOf(wrong.copy(text = "妈妈喜欢咖啡", fact = coffee.copy(subject = "妈妈"))), 36))
         val candidate = processing.memories().single { it.status == MemoryStatus.CANDIDATE }
-        processing.confirmMemory(candidate.id, 35)
+        processing.confirmMemory(candidate.id, 37)
         assertEquals("妈妈", processing.memory(candidate.id)?.fact?.subject)
         assertEquals(1, personalMemoryProfile(processing.memories()).items.size)
     }

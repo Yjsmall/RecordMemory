@@ -8,6 +8,8 @@
 
 0.4.4 接入应用内身份编辑、三项内置技能与开关、经过真实工具探测的主动回忆，以及默认关闭的自动候选整理。设置 → 助手提供身份、技能、记忆方式三个入口；对话可输入 `/weekly-review`、`/project-review`、`/personal-planning` 明确选用技能。自动整理使用独立 MEMORY 模型，结果仍需审核。实际范围与验证见 [助手功能接入](docs/personal-agent-integration-delivery.md)；目标设计见 [私人助手架构](docs/architecture/personal-agent.md)。
 
+0.4.5 增加无 Embedding 的聊天／录音转写检索、日期／项目筛选、最近记忆变更、持久化授权历史批次和可选自动确认。来源版本变化及忘记会屏蔽检索与迟到结果；历史整理需另行授权上传，自动整理每天最多 20 次尝试，未知结果不自动重试。自动确认默认关闭，仅允许合成评测覆盖的有限普通单句，敏感信息与冲突仍审核。实际边界、费用说明及测试见 [历史检索与可靠学习](docs/history-learning-delivery.md)、[质量评估](docs/memory-quality-evaluation.md)。
+
 保存录音后可转写、生成标题／总结和记忆候选；开启自动处理且配置有效服务后会上传音频与相关文本。关闭自动处理时只在详情中手动触发。对话只在主动发送或重试时上传所选上下文，不自动重试。详见 [录音 AI 功能](docs/feature-review-delivery.md)。
 
 0.3.2 按 vivo 官方文档调整原子通知并增加可复制诊断。官方接入要求应用上架、申请场景准入及平台开通权限；当前不能保证 OriginOS 7 胶囊出现。来源、改动、接入材料草稿与真机步骤见 [原子通知接入核对](docs/vivo-atomic-notification.md)。

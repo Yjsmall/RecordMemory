@@ -280,6 +280,11 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
         repository.setAutoLearning(enabled)
     }
 
+    fun setAutoConfirm(enabled: Boolean) = operation {
+        if (enabled) require(hasConfiguredMemory(privateSettings)) { "请先配置记忆提取模型与所需密钥" }
+        repository.setAutoConfirm(enabled)
+    }
+
     private fun hasConfiguredMemory(settings: PrivateSettings): Boolean {
         val binding = settings.configuration.binding(AiCapability.MEMORY)
         val connection = settings.configuration.connections.firstOrNull { it.id == binding.connectionId } ?: return false

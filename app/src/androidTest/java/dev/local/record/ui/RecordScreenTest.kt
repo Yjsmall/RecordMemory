@@ -9,6 +9,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.FontScale
 import androidx.compose.ui.test.ForcedSize
 import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -16,6 +17,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
@@ -70,7 +72,8 @@ class RecordScreenTest {
                 RecordScreen(listOf(sample.copy(status = RecordingStatus.RECORDING)), SessionState(SessionPhase.RECORDING, sample.id), PlaybackState(), true, null, true, {}, {}, {}, {}, {}, {})
             }
         }
-        compose.onNodeWithTag("recording-sample").performScrollTo().performTouchInput { swipeLeft() }
+        compose.onNodeWithTag("recording-list").performScrollToNode(hasTestTag("recording-sample"))
+        compose.onNodeWithTag("recording-sample").performTouchInput { swipeLeft() }
         compose.onNodeWithTag("delete-recording-sample").assertDoesNotExist()
     }
 

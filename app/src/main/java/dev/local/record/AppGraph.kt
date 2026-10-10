@@ -10,6 +10,7 @@ import dev.local.record.ai.AiProcessor
 import dev.local.record.ai.AiScheduler
 import dev.local.record.ai.AutomaticMemoryLearning
 import dev.local.record.ai.MemoryPlanner
+import dev.local.record.ai.MemoryPlanningScheduler
 import dev.local.record.ai.PersonalAssistant
 import dev.local.record.audio.RecordingRecovery
 import dev.local.record.audio.SessionState
@@ -52,7 +53,8 @@ class AppGraph @Inject constructor(@ApplicationContext context: Context) {
     val conversations = ConversationRepository(database)
     val agentCatalog = BuiltInAgentCatalog { context.assets.open(it) }
     val memoryPlanning = MemoryPlanningRepository(database)
-    val memoryPlanner = MemoryPlanner(memoryPlanning, conversations, processing, settingsRepository, recoveryScope)
+    val memoryPlanner: MemoryPlanner = MemoryPlanner(memoryPlanning, conversations, processing, settingsRepository, recoveryScope, wake = { memoryScheduler.kick() })
+    val memoryScheduler: MemoryPlanningScheduler = MemoryPlanningScheduler(context)
     val automaticLearning = AutomaticMemoryLearning(conversations, memoryPlanning, memoryPlanner, settingsRepository, recoveryScope)
     val assistant = PersonalAssistant(conversations, processing, settingsRepository, recoveryScope, catalog = agentCatalog, onAnswered = automaticLearning::onAnswered)
     private val recovery = recoveryScope.async<List<String>> {
@@ -62,6 +64,7 @@ class AppGraph @Inject constructor(@ApplicationContext context: Context) {
         conversations.purgeWithdrawnMemoryContent(System.currentTimeMillis())
         memoryPlanning.recoverInterrupted(System.currentTimeMillis())
         automaticLearning.start()
+        memoryScheduler.kick()
         scheduler.kick()
         messages
     }

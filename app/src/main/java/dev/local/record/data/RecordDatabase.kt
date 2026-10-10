@@ -84,6 +84,9 @@ interface RecordDao {
     @Query("SELECT * FROM events ORDER BY globalPosition")
     suspend fun events(): List<EventRow>
 
+    @Query("SELECT * FROM events ORDER BY globalPosition")
+    fun observeEvents(): Flow<List<EventRow>>
+
     @Query("SELECT MAX(aggregateVersion) FROM events WHERE aggregateId = :id")
     suspend fun version(id: String): Int?
 

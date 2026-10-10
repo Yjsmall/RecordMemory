@@ -92,7 +92,8 @@ class AgentSettingsScreenTest {
         compose.onNodeWithTag("agent-auto-learning").performScrollTo().performClick()
         compose.waitUntil(5_000) { model.state.value.agentPreferences.autoLearning }
         compose.onNodeWithTag("agent-auto-learning").assertIsOn()
-        compose.onNodeWithText("候选仍需你审核", substring = true).assertExists()
+        compose.onNodeWithText("默认产生待审核候选", substring = true).assertExists()
+        compose.onNodeWithTag("agent-auto-confirm").performScrollTo().assertIsOff()
         assertTrue(runBlocking { repository.settings.first().agent.autoLearning })
     }
 

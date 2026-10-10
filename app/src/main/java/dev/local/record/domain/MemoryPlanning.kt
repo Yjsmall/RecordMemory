@@ -21,7 +21,11 @@ data class MemoryPlanningTask(
 sealed interface MemoryPlanningEvent {
     @Serializable
     @SerialName("MemoryPlanningRequested")
-    data class Requested(val turnId: String, val requestContentId: String, val createdAt: Long = 0) : MemoryPlanningEvent
+    data class Requested(val turnId: String, val requestContentId: String, val createdAt: Long = 0, val automatic: Boolean = false) : MemoryPlanningEvent
+
+    @Serializable
+    @SerialName("MemoryPlanningSnapshotUpdated")
+    data class SnapshotUpdated(val requestContentId: String) : MemoryPlanningEvent
 
     @Serializable
     @SerialName("MemoryPlanningStarted")
@@ -51,6 +55,10 @@ fun evolveMemoryPlanning(state: MemoryPlanningTask, event: MemoryPlanningEvent):
         MemoryPlanningEvent.Started -> {
             require(state.version > 0 && state.status == MemoryPlanningStatus.REQUESTED)
             state.copy(status = MemoryPlanningStatus.RUNNING)
+        }
+        is MemoryPlanningEvent.SnapshotUpdated -> {
+            require(state.version > 0 && state.status == MemoryPlanningStatus.REQUESTED && event.requestContentId.isNotBlank())
+            state.copy(requestContentId = event.requestContentId)
         }
         is MemoryPlanningEvent.Completed -> {
             require(state.status == MemoryPlanningStatus.RUNNING && event.candidateCount in 0..3)

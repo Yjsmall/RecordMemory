@@ -118,6 +118,7 @@ data class AssistantContext(
     val historyMemories: List<MemoryReference> = emptyList(),
     val agent: dev.local.record.agent.AgentConfigurationSnapshot? = null,
     val memoryRevision: Long? = null,
+    /** Immutable body versions, revalidated at tool receipt and answer commit. */
     val sourceContentIds: List<String> = emptyList(),
     val toolReceiptIds: List<String> = emptyList()
 )

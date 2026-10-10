@@ -219,7 +219,7 @@ sealed interface MemoryEvent {
 
     @Serializable
     @SerialName("MemoryForgotten")
-    data class Forgotten(val fingerprint: String, val suppressionKey: String = "", val suppressionContentId: String = "") : MemoryEvent
+    data class Forgotten(val fingerprint: String, val suppressionKey: String = "", val suppressionContentId: String = "", val sourceContentIds: List<String> = emptyList()) : MemoryEvent
 
     @Serializable
     @SerialName("MemoryKnowledgeUpdated")
@@ -235,7 +235,7 @@ sealed interface MemoryEvent {
 
     @Serializable
     @SerialName("MemoryInvalidated")
-    data class Invalidated(val fingerprint: String) : MemoryEvent
+    data class Invalidated(val fingerprint: String, val sourceContentIds: List<String> = emptyList()) : MemoryEvent
 
     @Serializable
     @SerialName("MemoryMerged")
