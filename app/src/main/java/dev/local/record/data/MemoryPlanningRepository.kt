@@ -7,6 +7,7 @@ import dev.local.record.domain.MemoryPlanningTask
 import dev.local.record.domain.MemoryReference
 import dev.local.record.domain.MemoryStatus
 import dev.local.record.domain.TurnStatus
+import dev.local.record.domain.currentAt
 import dev.local.record.domain.evolveMemoryPlanning
 import dev.local.record.settings.AiCapability
 import dev.local.record.settings.AiConnection
@@ -24,7 +25,9 @@ data class MemoryPlanningInput(
     val memoryRevision: Long,
     val memories: List<MemoryReference>,
     val connection: AiConnection,
-    val binding: CapabilityBinding
+    val binding: CapabilityBinding,
+    val sourceZoneId: String? = null,
+    val sourceObservedAt: Long? = null
 )
 
 /** Event-first planning commands. This repository cannot call a provider or schedule work. */
@@ -45,7 +48,9 @@ class MemoryPlanningRepository(private val db: RecordDatabase) {
         require(db.processing().memories().none { it.sourceTurnId == turnId && it.status in setOf("FORGOTTEN", "INVALIDATED", "MERGED") }) { "此消息已有忘记或失效的记忆；如需重新记住，请手动保存" }
         val id = "memory-plan:${UUID.randomUUID()}"
         val contentId = "$id:input"
-        val input = MemoryPlanningInput(turn.userContentId, db.recordings().memoryRevision(), memories, connection, binding)
+        val sourceEvent = db.recordings().events().firstOrNull { it.aggregateId == turnId && it.eventType == "AssistantTurnRequested" }
+        val zoneId = sourceEvent?.let { (eventJson.decodeFromString<dev.local.record.domain.TurnEvent>(it.payload) as dev.local.record.domain.TurnEvent.Requested).sourceZoneId }
+        val input = MemoryPlanningInput(turn.userContentId, db.recordings().memoryRevision(), memories, connection, binding, zoneId, db.processing().content(turn.userContentId)?.createdAt)
         db.processing().saveContent(ContentRow(contentId, "memory-planning-input", eventJson.encodeToString(input), now))
         commit(MemoryPlanningTask(id), MemoryPlanningEvent.Requested(turnId, contentId, now), now)
     }
@@ -81,7 +86,8 @@ class MemoryPlanningRepository(private val db: RecordDatabase) {
         require(items.size <= 3 && items.all { it.text.isNotBlank() && it.text.length <= 500 && it.evidence.isNotBlank() && it.evidence.length <= 200 && turn.userText.contains(it.evidence) }) { "记忆证据不匹配" }
         val processing = ProcessingRepository(db)
         val before = processing.memories().count { it.sourceTurnId == current.turnId }
-        processing.proposeConversationMemories(current.turnId, items, now)
+        val prepared = MemoryKnowledgeRepository(db).prepare(current.turnId, items, input.memories.map { it.id }.toSet(), input.sourceZoneId)
+        processing.proposeConversationMemories(current.turnId, prepared, now)
         val count = processing.memories().count { it.sourceTurnId == current.turnId } - before
         commit(current, MemoryPlanningEvent.Completed(count), now)
         true
@@ -136,7 +142,7 @@ class MemoryPlanningRepository(private val db: RecordDatabase) {
             db.processing().content(input.sourceContentId)?.body == turn.userText &&
             db.recordings().memoryRevision() == input.memoryRevision && input.memories.all { ref ->
                 val memory = db.processing().memory(ref.id)?.domain()
-                memory?.version == ref.version && memory.status == MemoryStatus.CONFIRMED
+                memory?.version == ref.version && memory.currentAt(System.currentTimeMillis())
             }
     }
 

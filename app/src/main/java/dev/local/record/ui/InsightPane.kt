@@ -52,6 +52,8 @@ import dev.local.record.domain.JobStatus
 import dev.local.record.domain.MemoryItem
 import dev.local.record.domain.MemoryStatus
 import dev.local.record.domain.RecordingText
+import dev.local.record.domain.changeLabel
+import dev.local.record.domain.confirmable
 import dev.local.record.settings.AiCapability
 
 /** Read-first sections; generation, edits and status stay beside the content they affect. */
@@ -187,9 +189,13 @@ internal fun MemoryLibrary(
     onDisable: (String) -> Unit,
     onCorrect: (String, String) -> Unit,
     onMerge: (String, String) -> Unit,
-    onOpenSource: ((String) -> Unit)? = null
+    onOpenSource: ((String) -> Unit)? = null,
+    onAllowRelearning: (String) -> Unit = {}
 ) {
     var candidates by rememberSaveable { mutableStateOf(false) }
+    var suppressed by rememberSaveable { mutableStateOf(false) }
+    var allowing by rememberSaveable { mutableStateOf<String?>(null) }
+    val rules = memories.filter { it.suppressionKey.isNotBlank() }.distinctBy { it.suppressionKey }
     val visible = memories.filter { it.visible }
     val filtered = visible.filter { !candidates || it.status == MemoryStatus.CANDIDATE }
     LazyVerticalGrid(columns = GridCells.Adaptive(300.dp), modifier = Modifier.fillMaxSize().testTag("memory-library"), contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -197,6 +203,18 @@ internal fun MemoryLibrary(
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 FilterChip(selected = !candidates, onClick = { candidates = false }, label = { Text("全部 ${visible.size}") })
                 FilterChip(selected = candidates, onClick = { candidates = true }, label = { Text("待确认 ${visible.count { it.status == MemoryStatus.CANDIDATE }}") })
+                if (rules.isNotEmpty()) TextButton(onClick = { suppressed = !suppressed }) { Text("防重新学习范围 ${rules.size}") }
+            }
+        }
+        if (suppressed) {
+            item(span = { GridItemSpan(maxLineSpan) }) { Text("仅保留你指定的事实范围以阻止再次学习；原记忆正文已删除。解除后只允许新候选，不恢复旧正文。", style = MaterialTheme.typography.bodySmall) }
+            items(rules, key = { "suppression:${it.id}" }) { rule ->
+                SettingsGroup {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(rule.suppressionLabel.ifBlank { "${rule.type.label}范围" })
+                        TextButton(onClick = { allowing = rule.id }, modifier = Modifier.testTag("allow-relearning-${rule.id}")) { Text("允许重新学习") }
+                    }
+                }
             }
         }
         if (filtered.isEmpty()) {
@@ -204,7 +222,15 @@ internal fun MemoryLibrary(
                 EmptyContent(RecordIcons.Memory, if (candidates) "没有待确认的记忆" else "留住值得记住的事", if (candidates) "新候选会出现在这里" else "来自录音与对话，由你确认")
             }
         }
-        items(filtered, key = { it.id }) { memory -> MemoryCard(memory, visible.filter { it.id != memory.id && it.sourceRecordingId == memory.sourceRecordingId && it.sourceConversationId == memory.sourceConversationId }, onConfirm, onForget, onDisable, onCorrect, onMerge, onOpenSource) }
+        items(filtered, key = { it.id }) { memory -> MemoryCard(memory, visible.filter { it.id != memory.id }, onConfirm, onForget, onDisable, onCorrect, onMerge, onOpenSource) }
+    }
+    allowing?.let { id ->
+        AlertDialog(onDismissRequest = { allowing = null }, title = { Text("允许重新学习这个范围？") }, text = { Text("${rules.firstOrNull { it.id == id }?.suppressionLabel.orEmpty()}\n新提及可再次形成待确认候选；已删除的正文不会恢复。") }, confirmButton = {
+            TextButton(onClick = {
+                onAllowRelearning(id)
+                allowing = null
+            }) { Text("允许") }
+        }, dismissButton = { TextButton(onClick = { allowing = null }) { Text("取消") } })
     }
 }
 
@@ -224,21 +250,23 @@ private fun MemoryCard(memory: MemoryItem, others: List<MemoryItem>, onConfirm: 
     var edit by rememberSaveable(memory.id) { mutableStateOf(false) }
     var terminal by rememberSaveable(memory.id) { mutableStateOf<String?>(null) }
     var evidence by rememberSaveable(memory.id) { mutableStateOf(false) }
+    val editing = memory.change?.targetId?.let { id -> others.firstOrNull { it.id == id && it.status == MemoryStatus.CONFIRMED } } ?: memory
+    val mergeTargets = others.filter { memory.fact == null && memory.change?.targetId == null && it.fact == null && it.change?.targetId == null && it.sourceRecordingId == memory.sourceRecordingId && it.sourceConversationId == memory.sourceConversationId }
     SettingsGroup {
         Column(Modifier.padding(20.dp).testTag("memory-${memory.id}"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(memory.type.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    Text(if (memory.status == MemoryStatus.CONFIRMED) "已确认" else "待确认", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
+                    Text(memory.changeLabel(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
                 }
                 Box {
                     IconButton(onClick = { menu = true }, modifier = Modifier.testTag("memory-menu-${memory.id}")) { Icon(RecordIcons.More, "记忆操作") }
                     DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("编辑") }, onClick = {
+                        DropdownMenuItem(text = { Text(if (memory.change?.targetId != null) "纠正旧记忆" else "编辑") }, onClick = {
                             menu = false
                             edit = true
                         })
-                        if (others.isNotEmpty()) {
+                        if (mergeTargets.isNotEmpty()) {
                             DropdownMenuItem(text = { Text("合并到…") }, onClick = {
                                 menu = false
                                 merging = true
@@ -256,20 +284,32 @@ private fun MemoryCard(memory: MemoryItem, others: List<MemoryItem>, onConfirm: 
                 }
             }
             SelectionContainer { Text(memory.text, style = MaterialTheme.typography.bodyLarge) }
-            if (evidence && memory.evidence.isNotBlank()) Text(memory.evidence, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            MemoryKnowledgeDetails(memory, others + memory)
+            if (evidence) {
+                if (memory.fact == null && memory.evidence.isNotBlank()) Text(memory.evidence, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                memory.fact?.sources?.forEach { source ->
+                    Text("${source.zoneId?.let { java.time.Instant.ofEpochMilli(source.observedAt).atZone(java.time.ZoneId.of(it)).toLocalDate() } ?: "时区未知"} · ${source.evidence}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (source.origin == "USER_CORRECTION") Text("你在记忆页的纠正", style = MaterialTheme.typography.labelSmall)
+                    if (onOpenSource != null && (source.conversationId.isNotBlank() || source.recordingId.isNotBlank())) TextButton(onClick = { onOpenSource(if (source.conversationId.isNotBlank()) "chat:${source.conversationId}" else source.recordingId) }) { Text("打开此来源") }
+                }
+            }
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (memory.evidence.isNotBlank()) TextButton(onClick = { evidence = !evidence }) { Text(if (evidence) "收起依据" else "查看依据") }
-                if (onOpenSource != null) TextButton(onClick = { onOpenSource(if (memory.sourceConversationId.isNotBlank()) "chat:${memory.sourceConversationId}" else memory.sourceRecordingId) }) { Text(if (memory.sourceConversationId.isNotBlank()) "原对话" else "原录音") }
-                if (memory.status == MemoryStatus.CANDIDATE) FilledTonalButton(onClick = { onConfirm(memory.id) }, modifier = Modifier.testTag("confirm-memory-${memory.id}")) { Text("确认记忆") }
+                if (onOpenSource != null && (memory.sourceConversationId.isNotBlank() || memory.sourceRecordingId.isNotBlank())) TextButton(onClick = { onOpenSource(if (memory.sourceConversationId.isNotBlank()) "chat:${memory.sourceConversationId}" else memory.sourceRecordingId) }) { Text(if (memory.sourceConversationId.isNotBlank()) "原对话" else "原录音") }
+                if (memory.confirmable()) {
+                    FilledTonalButton(onClick = { onConfirm(memory.id) }, modifier = Modifier.testTag("confirm-memory-${memory.id}")) { Text(if (memory.change?.targetId != null) "确认${memory.changeLabel()}" else "确认记忆") }
+                } else if (memory.status == MemoryStatus.CANDIDATE) {
+                    TextButton(onClick = { edit = true }) { Text(if (memory.change?.targetId != null) "纠正旧记忆" else "澄清并编辑") }
+                }
             }
         }
     }
-    if (edit) EditDialog("编辑记忆", memory.text, { edit = false }) { onCorrect(memory.id, it) }
+    if (edit) EditDialog(if (editing.fact != null) "纠正此范围的记忆（日期将重置）" else "编辑记忆", editing.text, { edit = false }) { onCorrect(editing.id, it) }
     if (terminal != null) {
         AlertDialog(
             onDismissRequest = { terminal = null },
             title = { Text("${terminal}这条记忆？") },
-            text = { Text(if (terminal == "忘记") "将移除记忆正文，后续不会作为个人记忆使用。原始录音或对话保留。" else "这条记忆将不再作为个人记忆使用。") },
+            text = { Text(if (terminal == "忘记") "将移除记忆及相关派生正文，原始录音或对话保留。结构化事实会忘记同主体、同范围的事实，并保留最小范围标记阻止再次学习；可在记忆页明确解除。" else "这条记忆将不再作为个人记忆使用。") },
             confirmButton = {
                 TextButton(onClick = {
                     if (terminal == "忘记") onForget(memory.id) else onDisable(memory.id)
@@ -285,7 +325,7 @@ private fun MemoryCard(memory: MemoryItem, others: List<MemoryItem>, onConfirm: 
             title = { Text("合并到") },
             text = {
                 Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    others.forEach { target ->
+                    mergeTargets.forEach { target ->
                         TextButton(onClick = {
                             merging = false
                             onMerge(memory.id, target.id)

@@ -129,6 +129,7 @@ fun RecordScreen(
     onAcceptSummary: (String) -> Unit = {},
     onConfirmMemory: (String) -> Unit = {},
     onForgetMemory: (String) -> Unit = {},
+    onAllowMemoryRelearning: (String) -> Unit = {},
     onDisableMemory: (String) -> Unit = {},
     onCorrectMemory: (String, String) -> Unit = { _, _ -> },
     onMergeMemory: (String, String) -> Unit = { _, _ -> },
@@ -232,7 +233,7 @@ fun RecordScreen(
                                 while (backStack.size > 1) backStack.removeLastOrNull()
                                 backStack.add(Detail(id))
                             }
-                        })
+                        }, onAllowRelearning = onAllowMemoryRelearning)
                     }
                 }
                 entry<AssistantPage> { page ->

@@ -135,6 +135,8 @@ class LibraryViewModel(context: Context, val graph: AppGraph) : ViewModel() {
 
     fun forgetMemory(id: String) = ai { graph.processing.forgetMemory(id, System.currentTimeMillis()) }
 
+    fun allowMemoryRelearning(id: String) = ai { graph.processing.allowMemoryRelearning(id, System.currentTimeMillis()) }
+
     fun disableMemory(id: String) = ai { graph.processing.disableMemory(id, System.currentTimeMillis()) }
 
     fun correctMemory(id: String, value: String) = ai { graph.processing.correctMemory(id, value, System.currentTimeMillis()) }

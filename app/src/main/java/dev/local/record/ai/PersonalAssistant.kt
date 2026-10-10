@@ -4,8 +4,8 @@ import dev.local.record.data.ConversationRepository
 import dev.local.record.data.ProcessingRepository
 import dev.local.record.domain.AssistantContext
 import dev.local.record.domain.MemoryReference
-import dev.local.record.domain.MemoryStatus
 import dev.local.record.domain.TurnStatus
+import dev.local.record.domain.currentAt
 import dev.local.record.settings.AiCapability
 import dev.local.record.settings.SettingsRepository
 import kotlinx.coroutines.CancellationException
@@ -53,8 +53,8 @@ class PersonalAssistant(
                 val sources = allMemories.filter { it.sourceTurnId == prior.id }
                 if (sources.any { !it.visible || it.version > 2 }) return@filter false
                 val context = prior.contextContentId?.let { conversations.context(it) }
-                context != null && context.memories.all { ref -> allMemories.any { it.id == ref.id && it.version == ref.version && it.status == MemoryStatus.CONFIRMED } } &&
-                    context.historyMemories.all { ref -> allMemories.any { it.id == ref.id && it.version == ref.version && it.visible } }
+                context != null && context.memories.all { ref -> allMemories.any { it.id == ref.id && it.version == ref.version && it.currentAt(System.currentTimeMillis()) } } &&
+                    context.historyMemories.all { ref -> allMemories.any { it.id == ref.id && it.version == ref.version && it.visible && it.fact?.effectiveAt(System.currentTimeMillis()) != false } }
             }
             val recent = boundedConversationHistory(history)
             val dependencies = mutableListOf<MemoryReference>()

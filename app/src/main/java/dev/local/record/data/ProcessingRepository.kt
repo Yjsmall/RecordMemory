@@ -4,9 +4,12 @@ import androidx.room.withTransaction
 import dev.local.record.domain.AiJob
 import dev.local.record.domain.AiJobEvent
 import dev.local.record.domain.JobStatus
+import dev.local.record.domain.MemoryChange
 import dev.local.record.domain.MemoryEvent
+import dev.local.record.domain.MemoryFact
 import dev.local.record.domain.MemoryItem
 import dev.local.record.domain.MemoryKind
+import dev.local.record.domain.MemorySource
 import dev.local.record.domain.MemoryStatus
 import dev.local.record.domain.RecordingText
 import dev.local.record.domain.TextEvent
@@ -27,7 +30,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-data class MemoryDraft(val type: MemoryKind, val text: String, val evidence: String)
+data class MemoryDraft(val type: MemoryKind, val text: String, val evidence: String, val fact: MemoryFact? = null, val change: MemoryChange? = null)
 
 sealed interface StoredResult {
     data class Transcript(val text: String) : StoredResult
@@ -65,14 +68,16 @@ class ProcessingRepository(private val db: RecordDatabase) {
             if (explicit) {
                 val candidate = existing.firstOrNull { it.status == MemoryStatus.CANDIDATE && memoryFingerprint(it.text) == fingerprint }
                 if (candidate != null) {
-                    commitMemory(candidate.id, MemoryEvent.Confirmed, "${candidate.id}:confirm", now, null, null)
+                    require(candidate.change == null || candidate.change.action == dev.local.record.domain.MemoryAction.ADD) { "请先审核候选的冲突或替代方案" }
+                    MemoryKnowledgeRepository(db).confirm(candidate.id, now)
                     return@forEach
                 }
             }
-            if (existing.any { (it.visible || !explicit) && (it.fingerprint == fingerprint || it.text.isNotBlank() && memoryFingerprint(it.text) == fingerprint) }) return@forEach
+            if (item.fact != null && existing.any { it.suppressionKey == item.fact.key }) return@forEach
+            if (item.change?.targetId == null && existing.any { (it.visible || !explicit) && (it.fingerprint == fingerprint || it.text.isNotBlank() && memoryFingerprint(it.text) == fingerprint) }) return@forEach
             val id = UUID.randomUUID().toString()
             val contentId = UUID.randomUUID().toString()
-            dao.saveContent(ContentRow(contentId, "memory", memoryBody(item.text, item.evidence), now))
+            dao.saveContent(ContentRow(contentId, "memory", memoryBody(item.text, item.evidence, item.fact, item.change), now))
             commitMemory(id, MemoryEvent.FromConversation(item.type.name, contentId, turn.conversationId, turn.id, turn.userContentId), "$id:propose", now, item.text, item.evidence)
             if (explicit) commitMemory(id, MemoryEvent.Confirmed, "$id:confirm", now, null, null)
         }
@@ -81,7 +86,8 @@ class ProcessingRepository(private val db: RecordDatabase) {
 
     suspend fun onConversationDeleted(conversationId: String, now: Long) = db.withTransaction {
         MemoryPlanningRepository(db).deleteConversation(conversationId, now)
-        memories().filter { it.sourceConversationId == conversationId && it.visible }.forEach { memory ->
+        MemoryKnowledgeRepository(db).withdrawSources(now) { it.conversationId == conversationId }
+        memories().filter { it.fact == null && it.sourceConversationId == conversationId && (it.visible || it.status == MemoryStatus.SUPERSEDED) }.forEach { memory ->
             commitMemory(memory.id, MemoryEvent.Invalidated(memoryFingerprint(memory.text)), "${memory.id}:conversation-deleted", now, null, null)
             purgeHistoryContent("", memory.id)
             ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(memory.id), now = now)
@@ -181,6 +187,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         val contentId = UUID.randomUUID().toString()
         dao.saveContent(ContentRow(contentId, "transcript", body, now))
         commitText(recordingId, TextEvent.TranscriptSet(contentId, TextOrigin.USER.name), "$recordingId:transcript:$contentId", now, body)
+        MemoryKnowledgeRepository(db).withdrawSources(now) { it.recordingId == recordingId && it.contentId != contentId }
         dao.memoriesFor(recordingId).map(MemoryRow::domain).filter { it.visible && it.sourceContentId != contentId }.forEach { item ->
             commitMemory(item.id, MemoryEvent.Invalidated(memoryFingerprint(item.text)), "${item.id}:transcript-revised:$contentId", now, null, null)
             purgeHistoryContent(recordingId, item.id)
@@ -213,20 +220,43 @@ class ProcessingRepository(private val db: RecordDatabase) {
     }
 
     suspend fun confirmMemory(id: String, now: Long) = db.withTransaction {
-        commitMemory(id, MemoryEvent.Confirmed, "$id:confirm", now, null, null)
+        MemoryKnowledgeRepository(db).confirm(id, now)
         MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
+
+    suspend fun allowMemoryRelearning(id: String, now: Long) = MemoryKnowledgeRepository(db).allowRelearning(id, now)
 
     suspend fun correctMemory(id: String, value: String, now: Long) = db.withTransaction {
         val body = value.trim()
-        require(body.isNotBlank()) { "记忆不能为空" }
+        require(body.isNotBlank() && body.length <= 500) { "记忆不能为空且最多500字" }
+        val current = requireNotNull(memory(id))
+        require(current.change?.targetId == null) { "请纠正关联的旧记忆，或补充说明后重新整理" }
         val contentId = UUID.randomUUID().toString()
-        dao.saveContent(ContentRow(contentId, "memory", memoryBody(body, memory(id)?.evidence.orEmpty()), now))
-        commitMemory(id, MemoryEvent.Corrected(contentId), "$id:correct:$contentId", now, body, memory(id)?.evidence)
+        val fact = current.fact?.copy(
+            validFrom = null,
+            validUntil = null,
+            sources = listOf(
+                MemorySource(
+                    contentId = contentId,
+                    origin = "USER_CORRECTION",
+                    evidence = body,
+                    start = 0,
+                    end = body.length,
+                    observedAt = now,
+                    zoneId = java.time.ZoneId.systemDefault().id
+                )
+            )
+        )
+        dao.saveContent(ContentRow(contentId, "memory", memoryBody(body, body, fact), now))
+        commitMemory(id, MemoryEvent.Corrected(contentId), "$id:correct:$contentId", now, body, body)
+        if (current.fact != null) {
+            purgeHistoryContent(current.sourceRecordingId, id, contentId)
+            ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(id), deletedTurnIds = current.fact.sources.map { it.turnId }.filter { it.isNotBlank() }.toSet(), now = now)
+        }
         MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 
-    suspend fun forgetMemory(id: String, now: Long) = terminalMemory(id, now, "forget") { MemoryEvent.Forgotten(it) }
+    suspend fun forgetMemory(id: String, now: Long) = MemoryKnowledgeRepository(db).forget(id, now)
 
     suspend fun disableMemory(id: String, now: Long) = terminalMemory(id, now, "disable") { MemoryEvent.Invalidated(it) }
 
@@ -234,6 +264,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         val source = requireNotNull(memory(sourceId)) { "找不到要合并的记忆" }
         val target = requireNotNull(memory(targetId)) { "找不到合并目标" }
         require(source.visible && target.visible) { "只能合并仍有效的记忆" }
+        require(source.fact == null && target.fact == null && source.change?.targetId == null && target.change?.targetId == null) { "结构化事实请使用补充依据或替代审核" }
         require(source.sourceRecordingId == target.sourceRecordingId && source.sourceConversationId == target.sourceConversationId) { "请合并同一录音或对话中的记忆" }
         val combined = listOf(target.text, source.text).filter { it.isNotBlank() }.distinct().joinToString("\n")
         val contentId = UUID.randomUUID().toString()
@@ -246,6 +277,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
     }
 
     suspend fun onRecordingDeleted(recordingId: String, now: Long) = db.withTransaction {
+        MemoryKnowledgeRepository(db).withdrawSources(now) { it.recordingId == recordingId }
         MemoryPlanningRepository(db).invalidateSnapshots(now)
         cancelOpen(recordingId, setOf("ASR", "TITLE", "SUMMARY", "MEMORY"), now)
         dao.memoriesFor(recordingId).map(MemoryRow::domain).filter { it.visible }.forEach { item ->
@@ -288,7 +320,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
                     check(row.aggregateVersion == state.version + 1) { "Non-contiguous aggregate history" }
                     val event = eventJson.decodeFromString(MemoryEvent.serializer(), row.payload)
                     val body = memoryContent(event)
-                    memories[row.aggregateId] = evolveMemory(state, event, body?.text, body?.evidence)
+                    memories[row.aggregateId] = evolveMemory(state, event, body?.text, body?.evidence, body?.fact, body?.change)
                 }
                 else -> error("Unsupported event schema")
             }
@@ -327,23 +359,24 @@ class ProcessingRepository(private val db: RecordDatabase) {
         commitText(recordingId, event(contentId), "$recordingId:$kind:$contentId", now, body)
     }
 
-    private suspend fun terminalMemory(id: String, now: Long, name: String, event: (String) -> MemoryEvent) = db.withTransaction {
+    internal suspend fun terminalMemory(id: String, now: Long, name: String, event: (String) -> MemoryEvent) = db.withTransaction {
         val current = requireNotNull(memory(id)) { "找不到记忆" }
-        if (!current.visible) return@withTransaction
+        if (!current.visible && current.status != MemoryStatus.SUPERSEDED) return@withTransaction
         commitMemory(id, event(memoryFingerprint(current.text)), "$id:$name", now, null, null)
         purgeHistoryContent(current.sourceRecordingId, memoryId = id)
-        ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(id), now = now)
+        ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(id), deletedTurnIds = current.fact?.sources.orEmpty().map { it.turnId }.filter { it.isNotBlank() }.toSet(), now = now)
         MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 
     /** Tombstones retain metadata; all associated historic bodies must also be removed. */
-    private suspend fun purgeHistoryContent(recordingId: String, memoryId: String? = null) {
+    internal suspend fun purgeHistoryContent(recordingId: String, memoryId: String? = null, keepContentId: String? = null) {
+        val protectedSources = keepContentId?.let { dao.content(it) }?.body?.let { eventJson.decodeFromString<MemoryBody>(it) }?.fact?.sources.orEmpty().filter { it.origin == "USER_CORRECTION" }.map { it.contentId }.toSet()
         events.events().filter { row ->
             if (memoryId != null) row.aggregateType == "Memory" && row.aggregateId == memoryId else row.correlationId == recordingId
         }.forEach { row ->
             val payload = eventJson.parseToJsonElement(row.payload).jsonObject
             listOf("contentId", "resultContentId").forEach { field ->
-                payload[field]?.jsonPrimitive?.content?.let { dao.deleteContent(it) }
+                payload[field]?.jsonPrimitive?.content?.takeIf { it != keepContentId && it !in protectedSources }?.let { dao.deleteContent(it) }
             }
         }
         if (memoryId != null) {
@@ -404,7 +437,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         return next
     }
 
-    private suspend fun commitMemory(id: String, event: MemoryEvent, commandId: String, now: Long, text: String?, evidence: String?): MemoryItem {
+    internal suspend fun commitMemory(id: String, event: MemoryEvent, commandId: String, now: Long, text: String?, evidence: String?): MemoryItem {
         val payload = eventJson.encodeToString(MemoryEvent.serializer(), event)
         events.command(commandId)?.let { prior ->
             require(prior.aggregateId == id && prior.payload == payload) { "Idempotency key reused for a different command" }
@@ -414,7 +447,8 @@ class ProcessingRepository(private val db: RecordDatabase) {
         val current = dao.memory(id)?.domain() ?: MemoryItem(id)
         check(current.version == version) { "Projection needs rebuilding" }
         validateMemory(current, event)
-        val next = evolveMemory(current, event, text, evidence)
+        val body = memoryContent(event)
+        val next = evolveMemory(current, event, text ?: body?.text, evidence ?: body?.evidence, body?.fact, body?.change)
         insertEvent("Memory", id, next.version, payload, commandId, now, next.sourceRecordingId.ifBlank { next.sourceConversationId.ifBlank { id } })
         dao.saveMemory(MemoryRow.from(next))
         return next
@@ -456,6 +490,8 @@ class ProcessingRepository(private val db: RecordDatabase) {
             is MemoryEvent.Proposed -> event.contentId
             is MemoryEvent.FromConversation -> event.contentId
             is MemoryEvent.Corrected -> event.contentId
+            is MemoryEvent.KnowledgeUpdated -> event.contentId
+            is MemoryEvent.Forgotten -> event.suppressionContentId.takeIf { it.isNotEmpty() } ?: return null
             else -> return null
         }
         val row = dao.content(id) ?: return null
@@ -464,6 +500,6 @@ class ProcessingRepository(private val db: RecordDatabase) {
 }
 
 @Serializable
-private data class MemoryBody(val text: String, val evidence: String = "")
+internal data class MemoryBody(val text: String, val evidence: String = "", val fact: MemoryFact? = null, val change: MemoryChange? = null)
 
-private fun memoryBody(text: String, evidence: String) = eventJson.encodeToString(MemoryBody(text, evidence))
+internal fun memoryBody(text: String, evidence: String, fact: MemoryFact? = null, change: MemoryChange? = null) = eventJson.encodeToString(MemoryBody(text, evidence, fact, change))

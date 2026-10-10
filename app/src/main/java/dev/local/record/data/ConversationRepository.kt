@@ -7,6 +7,7 @@ import dev.local.record.domain.Conversation
 import dev.local.record.domain.ConversationEvent
 import dev.local.record.domain.TurnEvent
 import dev.local.record.domain.TurnStatus
+import dev.local.record.domain.currentAt
 import dev.local.record.domain.evolveConversation
 import dev.local.record.domain.evolveTurn
 import dev.local.record.domain.validateTurn
@@ -50,7 +51,7 @@ class ConversationRepository(private val db: RecordDatabase) {
             require(previous.none { it.status in setOf(TurnStatus.RUNNING, TurnStatus.REQUESTED) }) { "请等待当前回复或先停止" }
             val contentId = "$id:user"
             content.saveContent(ContentRow(contentId, "chat-user", body, now))
-            commitTurn(id, TurnEvent.Requested(conversationId, (previous.maxOfOrNull { it.sequence } ?: 0) + 1, contentId), now, body)
+            commitTurn(id, TurnEvent.Requested(conversationId, (previous.maxOfOrNull { it.sequence } ?: 0) + 1, contentId, java.time.ZoneId.systemDefault().id), now, body)
         }
     }
 
@@ -73,10 +74,10 @@ class ConversationRepository(private val db: RecordDatabase) {
 
     private suspend fun snapshotIsValid(snapshot: AssistantContext): Boolean = snapshot.memories.all { reference ->
         val memory = content.memory(reference.id)?.domain()
-        memory?.version == reference.version && memory.status == dev.local.record.domain.MemoryStatus.CONFIRMED
+        memory?.version == reference.version && memory.currentAt(System.currentTimeMillis())
     } && snapshot.historyMemories.all { reference ->
         val memory = content.memory(reference.id)?.domain()
-        memory?.version == reference.version && memory.visible
+        memory?.version == reference.version && memory.visible && (memory.fact?.effectiveAt(System.currentTimeMillis()) != false)
     } && snapshot.historyTurnIds.all { turn(it)?.status == TurnStatus.ANSWERED }
 
     suspend fun answer(id: String, attempt: Int, reply: String, memories: List<MemoryDraft>, now: Long): Boolean = db.withTransaction {
@@ -129,7 +130,7 @@ class ConversationRepository(private val db: RecordDatabase) {
     /** Removes every historic derived reply/context, retaining user messages under their own scope. */
     suspend fun withdrawDerivedContent(memoryIds: Set<String> = emptySet(), deletedTurnIds: Set<String> = emptySet(), now: Long) = db.withTransaction {
         val affected = deletedTurnIds.toMutableSet()
-        affected.addAll(content.memories().filter { it.id in memoryIds }.map { it.sourceTurnId }.filter { it.isNotBlank() })
+        affected.addAll(content.memories().filter { it.id in memoryIds }.flatMap { listOf(it.sourceTurnId) + it.domain().fact?.sources.orEmpty().map { source -> source.turnId } }.filter { it.isNotBlank() })
         val history = events.events().filter { it.aggregateType == "AssistantTurn" }
         val snapshots = history.mapNotNull { row ->
             val id = eventJson.parseToJsonElement(row.payload).jsonObject["contextContentId"]?.jsonPrimitive?.content
@@ -156,7 +157,7 @@ class ConversationRepository(private val db: RecordDatabase) {
         val memories = content.memories().filter { it.status in setOf("FORGOTTEN", "INVALIDATED", "MERGED") }
         val history = events.events()
         val pending = memories.filter { memory ->
-            val revokedAt = history.lastOrNull { it.aggregateType == "Memory" && it.aggregateId == memory.id }?.globalPosition ?: 0
+            val revokedAt = history.lastOrNull { it.aggregateType == "Memory" && it.aggregateId == memory.id && it.eventType in setOf("MemoryForgotten", "MemoryInvalidated", "MemoryMerged") }?.globalPosition ?: 0
             val cleanedAt = history.lastOrNull { it.aggregateType == "AssistantTurn" && it.aggregateId == memory.sourceTurnId && it.eventType == "AssistantContextWithdrawn" }?.globalPosition ?: 0
             memory.sourceTurnId.isBlank() || cleanedAt <= revokedAt
         }

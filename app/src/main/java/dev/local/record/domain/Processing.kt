@@ -14,7 +14,7 @@ enum class MemoryKind(val label: String) {
     IDEA("想法")
 }
 
-enum class MemoryStatus { CANDIDATE, CONFIRMED, FORGOTTEN, INVALIDATED, MERGED }
+enum class MemoryStatus { CANDIDATE, CONFIRMED, FORGOTTEN, INVALIDATED, MERGED, SUPERSEDED }
 
 enum class TextOrigin { NONE, AI, USER }
 
@@ -219,7 +219,19 @@ sealed interface MemoryEvent {
 
     @Serializable
     @SerialName("MemoryForgotten")
-    data class Forgotten(val fingerprint: String) : MemoryEvent
+    data class Forgotten(val fingerprint: String, val suppressionKey: String = "", val suppressionContentId: String = "") : MemoryEvent
+
+    @Serializable
+    @SerialName("MemoryKnowledgeUpdated")
+    data class KnowledgeUpdated(val contentId: String) : MemoryEvent
+
+    @Serializable
+    @SerialName("MemorySuperseded")
+    data class Superseded(val byId: String) : MemoryEvent
+
+    @Serializable
+    @SerialName("MemoryRelearningAllowed")
+    data object RelearningAllowed : MemoryEvent
 
     @Serializable
     @SerialName("MemoryInvalidated")
@@ -243,12 +255,16 @@ data class MemoryItem(
     val sourceContentId: String = "",
     val fingerprint: String = "",
     val sourceConversationId: String = "",
-    val sourceTurnId: String = ""
+    val sourceTurnId: String = "",
+    val fact: MemoryFact? = null,
+    val change: MemoryChange? = null,
+    val suppressionKey: String = "",
+    val suppressionLabel: String = ""
 ) {
     val visible: Boolean get() = status == MemoryStatus.CANDIDATE || status == MemoryStatus.CONFIRMED
 }
 
-fun evolveMemory(state: MemoryItem, event: MemoryEvent, text: String?, evidence: String?): MemoryItem {
+fun evolveMemory(state: MemoryItem, event: MemoryEvent, text: String?, evidence: String?, fact: MemoryFact? = null, change: MemoryChange? = null): MemoryItem {
     val next = when (event) {
         is MemoryEvent.Proposed -> state.copy(
             type = MemoryKind.valueOf(event.type),
@@ -259,14 +275,39 @@ fun evolveMemory(state: MemoryItem, event: MemoryEvent, text: String?, evidence:
             sourceRecordingId = event.sourceRecordingId,
             sourceContentId = event.sourceContentId
         )
-        MemoryEvent.Confirmed -> state.copy(status = MemoryStatus.CONFIRMED)
+        MemoryEvent.Confirmed -> state.copy(status = MemoryStatus.CONFIRMED, change = null)
         is MemoryEvent.FromConversation -> state.copy(type = MemoryKind.valueOf(event.type), status = MemoryStatus.CANDIDATE, text = text.orEmpty(), evidence = evidence.orEmpty(), contentId = event.contentId, sourceConversationId = event.conversationId, sourceTurnId = event.turnId, sourceContentId = event.sourceContentId)
-        is MemoryEvent.Corrected -> state.copy(status = MemoryStatus.CONFIRMED, text = text.orEmpty(), evidence = evidence ?: state.evidence, contentId = event.contentId, fingerprint = "")
-        is MemoryEvent.Forgotten -> state.copy(status = MemoryStatus.FORGOTTEN, text = "", evidence = "", fingerprint = event.fingerprint)
-        is MemoryEvent.Invalidated -> state.copy(status = MemoryStatus.INVALIDATED, text = "", evidence = "", fingerprint = event.fingerprint)
-        is MemoryEvent.Merged -> state.copy(status = MemoryStatus.MERGED, text = "", evidence = "", fingerprint = event.fingerprint)
+        is MemoryEvent.Corrected -> state.copy(
+            status = MemoryStatus.CONFIRMED, text = text.orEmpty(), evidence = evidence ?: state.evidence, contentId = event.contentId, fingerprint = "", fact = fact, change = null,
+            sourceContentId = fact?.sources?.firstOrNull()?.contentId ?: state.sourceContentId,
+            sourceConversationId = if (fact != null) fact.sources.firstOrNull()?.conversationId.orEmpty() else state.sourceConversationId,
+            sourceTurnId = if (fact != null) fact.sources.firstOrNull()?.turnId.orEmpty() else state.sourceTurnId,
+            sourceRecordingId = if (fact != null) fact.sources.firstOrNull()?.recordingId.orEmpty() else state.sourceRecordingId
+        )
+        is MemoryEvent.Forgotten -> state.copy(status = MemoryStatus.FORGOTTEN, text = "", evidence = "", fingerprint = event.fingerprint, fact = null, change = null, suppressionKey = event.suppressionKey, suppressionLabel = text.orEmpty())
+        is MemoryEvent.Invalidated -> state.copy(status = MemoryStatus.INVALIDATED, text = "", evidence = "", fingerprint = event.fingerprint, fact = null, change = null)
+        is MemoryEvent.Merged -> state.copy(status = MemoryStatus.MERGED, text = "", evidence = "", fingerprint = event.fingerprint, fact = null, change = null)
+        is MemoryEvent.Superseded -> state.copy(status = MemoryStatus.SUPERSEDED)
+        MemoryEvent.RelearningAllowed -> state.copy(suppressionKey = "", suppressionLabel = "")
+        is MemoryEvent.KnowledgeUpdated -> {
+            val source = fact?.sources?.firstOrNull()
+            state.copy(
+                text = text.orEmpty(),
+                evidence = evidence.orEmpty(),
+                contentId = event.contentId,
+                fact = fact,
+                sourceContentId = source?.contentId.orEmpty(),
+                sourceRecordingId = source?.recordingId.orEmpty(),
+                sourceConversationId = source?.conversationId.orEmpty(),
+                sourceTurnId = source?.turnId.orEmpty()
+            )
+        }
     }
-    return next.copy(version = state.version + 1)
+    return next.copy(
+        version = state.version + 1,
+        fact = if (event is MemoryEvent.Proposed || event is MemoryEvent.FromConversation) fact else next.fact,
+        change = if (event is MemoryEvent.Proposed || event is MemoryEvent.FromConversation) change else next.change
+    )
 }
 
 fun validateMemory(state: MemoryItem, event: MemoryEvent) {
@@ -277,9 +318,12 @@ fun validateMemory(state: MemoryItem, event: MemoryEvent) {
             is MemoryEvent.FromConversation -> state.version == 0 && event.contentId.isNotBlank() && event.conversationId.isNotBlank() && event.turnId.isNotBlank() && event.sourceContentId.isNotBlank()
             MemoryEvent.Confirmed -> state.status == MemoryStatus.CANDIDATE
             is MemoryEvent.Corrected -> active && event.contentId.isNotBlank()
-            is MemoryEvent.Forgotten -> active && event.fingerprint.isNotBlank()
-            is MemoryEvent.Invalidated -> active && event.fingerprint.isNotBlank()
+            is MemoryEvent.Forgotten -> (active || state.status == MemoryStatus.SUPERSEDED) && event.fingerprint.isNotBlank()
+            is MemoryEvent.Invalidated -> (active || state.status == MemoryStatus.SUPERSEDED) && event.fingerprint.isNotBlank()
             is MemoryEvent.Merged -> active && event.intoId.isNotBlank() && event.intoId != state.id && event.fingerprint.isNotBlank()
+            is MemoryEvent.KnowledgeUpdated -> (active || state.status == MemoryStatus.SUPERSEDED) && event.contentId.isNotBlank()
+            is MemoryEvent.Superseded -> state.status == MemoryStatus.CONFIRMED && event.byId.isNotBlank() && event.byId != state.id
+            MemoryEvent.RelearningAllowed -> state.status == MemoryStatus.FORGOTTEN && state.suppressionKey.isNotBlank()
         }
     ) { "Invalid memory transition: ${state.status} -> $event" }
 }

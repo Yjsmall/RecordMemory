@@ -58,6 +58,9 @@ import dev.local.record.domain.MemoryPlanningStatus
 import dev.local.record.domain.MemoryPlanningTask
 import dev.local.record.domain.MemoryStatus
 import dev.local.record.domain.TurnStatus
+import dev.local.record.domain.changeLabel
+import dev.local.record.domain.confirmable
+import dev.local.record.domain.currentAt
 import dev.local.record.domain.personalMemoryProfile
 
 /** Parent owns safeDrawing (including IME); the composer stays outside the scrolling messages. */
@@ -179,13 +182,18 @@ internal fun AssistantScreen(
                                 state.memories.filter { it.sourceTurnId == turn.id && it.visible }.forEach { memory ->
                                     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth()) {
                                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text(if (memory.status == MemoryStatus.CONFIRMED) "已记住 · ${memory.type.label}" else "待确认 · ${memory.type.label}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                            Text("${memory.changeLabel()} · ${memory.type.label}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                                             Text(memory.text, style = MaterialTheme.typography.bodyMedium)
+                                            MemoryKnowledgeDetails(memory, state.memories)
                                             if (memory.evidence.isNotBlank()) Text("依据：${memory.evidence}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                             if (memory.status == MemoryStatus.CANDIDATE) {
                                                 Row(Modifier.align(Alignment.End)) {
                                                     TextButton(onClick = { onForget(memory.id) }) { Text("忽略") }
-                                                    FilledTonalButton(onClick = { onConfirm(memory.id) }, modifier = Modifier.testTag("assistant-confirm-${memory.id}")) { Text("确认记忆") }
+                                                    if (memory.confirmable()) {
+                                                        FilledTonalButton(onClick = { onConfirm(memory.id) }, modifier = Modifier.testTag("assistant-confirm-${memory.id}")) { Text(if (memory.change?.targetId != null) "确认${memory.changeLabel()}" else "确认记忆") }
+                                                    } else {
+                                                        TextButton(onClick = onMemories) { Text("到记忆页澄清") }
+                                                    }
                                                 }
                                             }
                                         }
@@ -216,7 +224,7 @@ internal fun AssistantScreen(
             }
             if (!compact) {
                 Text(
-                    if (state.configured) "发送至所选服务 · 可使用 ${state.memories.count { it.status == MemoryStatus.CONFIRMED }} 条已确认记忆" else "在设置中配置私人助手模型",
+                    if (state.configured) "发送至所选服务 · 可使用 ${state.memories.count { it.currentAt(System.currentTimeMillis()) }} 条已确认记忆" else "在设置中配置私人助手模型",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 12.dp)

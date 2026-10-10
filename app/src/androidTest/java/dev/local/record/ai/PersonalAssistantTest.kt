@@ -177,7 +177,7 @@ class PersonalAssistantTest {
                     assertEquals(1, server.requestCount)
                     assertTrue(requireNotNull(server.takeRequest(3, TimeUnit.SECONDS)).body.readUtf8().contains("answer-model"))
                     settings.saveBinding(CapabilityBinding(AiCapability.MEMORY, "provider", "memory-model"))
-                    enqueue("""{"schemaVersion":1,"items":[{"action":"ADD","type":"preference","text":"喜欢简短回答","evidence":"我喜欢简短的回答"}]}""")
+                    enqueue("""{"schemaVersion":2,"items":[{"action":"ADD","type":"preference","text":"喜欢简短回答","evidence":"我喜欢简短的回答","fact":{"subject":"self","predicate":"communication.style"}}]}""")
                     repeat(6) { planner.request("t") }
                     withTimeout(10_000) { while (db.memoryPlanning().all().singleOrNull()?.status != "COMPLETED") delay(20) }
                     val request = requireNotNull(server.takeRequest(3, TimeUnit.SECONDS)).body.readUtf8()
@@ -237,14 +237,14 @@ class PersonalAssistantTest {
     @Test fun plannerTimeoutIsFailedAndOnlyExplicitRetryCallsProviderAgain() = runBlocking {
         fixture(timeoutMillis = 1_000) { f ->
             f.answered("t")
-            f.server.enqueue(response("""{"schemaVersion":1,"items":[]}""").setBodyDelay(3, TimeUnit.SECONDS))
+            f.server.enqueue(response("""{"schemaVersion":2,"items":[]}""").setBodyDelay(3, TimeUnit.SECONDS))
             f.planner.request("t")
             withTimeout(10_000) { while (f.db.memoryPlanning().all().singleOrNull()?.failure != "TIMEOUT") delay(20) }
             val first = f.db.memoryPlanning().all().single()
             assertEquals("FAILED", first.status)
             assertEquals(1, f.server.requestCount)
             assertTrue(f.processing.memories().isEmpty())
-            f.server.enqueue(response("""{"schemaVersion":1,"items":[]}"""))
+            f.server.enqueue(response("""{"schemaVersion":2,"items":[]}"""))
             f.planner.request("t")
             withTimeout(10_000) { while (f.db.memoryPlanning().all().none { it.status == "COMPLETED" }) delay(20) }
             assertEquals(2, f.server.requestCount)
@@ -256,7 +256,7 @@ class PersonalAssistantTest {
         fixture { f ->
             f.answered("first")
             f.answered("queued")
-            f.server.enqueue(response("""{"schemaVersion":1,"items":[]}""").setBodyDelay(3, TimeUnit.SECONDS))
+            f.server.enqueue(response("""{"schemaVersion":2,"items":[]}""").setBodyDelay(3, TimeUnit.SECONDS))
             f.planner.request("first")
             requireNotNull(f.server.takeRequest(3, TimeUnit.SECONDS))
             f.planner.request("queued")

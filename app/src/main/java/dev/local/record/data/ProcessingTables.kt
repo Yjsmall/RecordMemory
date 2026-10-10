@@ -9,6 +9,8 @@ import androidx.room.PrimaryKey
 import androidx.room.Query
 import dev.local.record.domain.AiJob
 import dev.local.record.domain.JobStatus
+import dev.local.record.domain.MemoryChange
+import dev.local.record.domain.MemoryFact
 import dev.local.record.domain.MemoryItem
 import dev.local.record.domain.MemoryKind
 import dev.local.record.domain.MemoryStatus
@@ -93,14 +95,22 @@ data class MemoryRow(
     val sourceContentId: String,
     val fingerprint: String,
     @ColumnInfo(defaultValue = "''") val sourceConversationId: String = "",
-    @ColumnInfo(defaultValue = "''") val sourceTurnId: String = ""
+    @ColumnInfo(defaultValue = "''") val sourceTurnId: String = "",
+    @ColumnInfo(defaultValue = "NULL") val factJson: String? = null,
+    @ColumnInfo(defaultValue = "NULL") val changeJson: String? = null,
+    @ColumnInfo(defaultValue = "''") val suppressionKey: String = "",
+    @ColumnInfo(defaultValue = "''") val suppressionLabel: String = ""
 ) {
-    fun domain() = MemoryItem(id, version, MemoryKind.valueOf(type), MemoryStatus.valueOf(status), text, evidence, contentId, sourceRecordingId, sourceContentId, fingerprint, sourceConversationId, sourceTurnId)
+    fun domain() = MemoryItem(
+        id, version, MemoryKind.valueOf(type), MemoryStatus.valueOf(status), text, evidence, contentId, sourceRecordingId, sourceContentId, fingerprint, sourceConversationId, sourceTurnId,
+        factJson?.let { eventJson.decodeFromString<MemoryFact>(it) }, changeJson?.let { eventJson.decodeFromString<MemoryChange>(it) }, suppressionKey, suppressionLabel
+    )
 
     companion object {
         fun from(state: MemoryItem) = MemoryRow(
             state.id, state.version, state.type.name, state.status.name, state.text, state.evidence, state.contentId,
-            state.sourceRecordingId, state.sourceContentId, state.fingerprint, state.sourceConversationId, state.sourceTurnId
+            state.sourceRecordingId, state.sourceContentId, state.fingerprint, state.sourceConversationId, state.sourceTurnId,
+            state.fact?.let { eventJson.encodeToString(MemoryFact.serializer(), it) }, state.change?.let { eventJson.encodeToString(MemoryChange.serializer(), it) }, state.suppressionKey, state.suppressionLabel
         )
     }
 }

@@ -27,7 +27,7 @@ fun evolveConversation(state: Conversation, event: ConversationEvent): Conversat
 sealed interface TurnEvent {
     @Serializable
     @SerialName("AssistantTurnRequested")
-    data class Requested(val conversationId: String, val sequence: Int, val userContentId: String) : TurnEvent
+    data class Requested(val conversationId: String, val sequence: Int, val userContentId: String, val sourceZoneId: String? = null) : TurnEvent
 
     @Serializable
     @SerialName("AssistantAttemptStarted")

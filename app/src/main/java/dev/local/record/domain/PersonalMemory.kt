@@ -5,12 +5,15 @@ data class PersonalMemoryProfile(val preferences: List<MemoryItem>, val projects
     val items get() = preferences + projects + otherFacts
 }
 
-fun personalMemoryProfile(memories: List<MemoryItem>): PersonalMemoryProfile {
-    val facts = memories.filter { it.status == MemoryStatus.CONFIRMED && it.text.isNotBlank() }.sortedBy { it.id }
+fun personalMemoryProfile(memories: List<MemoryItem>, now: Long = System.currentTimeMillis()): PersonalMemoryProfile {
+    val facts = memories.filter { it.currentAt(now) }.sortedBy { it.id }
+    val personal = facts.filter { it.fact == null || it.fact.subject == "self" }
+    val preferences = personal.filter { it.type in setOf(MemoryKind.PREFERENCE, MemoryKind.AGREEMENT) }
+    val projects = personal.filter { it.type in setOf(MemoryKind.PROJECT, MemoryKind.TODO) }
     return PersonalMemoryProfile(
-        facts.filter { it.type in setOf(MemoryKind.PREFERENCE, MemoryKind.AGREEMENT) },
-        facts.filter { it.type in setOf(MemoryKind.PROJECT, MemoryKind.TODO) },
-        facts.filter { it.type in setOf(MemoryKind.PERSON, MemoryKind.IDEA) }
+        preferences,
+        projects,
+        facts.filterNot { it in preferences || it in projects }
     )
 }
 
@@ -28,7 +31,7 @@ fun selectPersonalMemoryContext(memories: List<MemoryItem>, question: String, ma
     val smallProfile = profile.preferences.take(8)
     var remaining = maxCharacters
     return (matches + smallProfile).distinctBy { it.id }.filter { item ->
-        val size = item.text.length + 60
+        val size = item.text.length + 60 + (item.fact?.let { it.subject.length + it.predicate.length + it.scope.length + 60 } ?: 0)
         (size <= remaining).also { accepted -> if (accepted) remaining -= size }
     }.take(maxItems)
 }

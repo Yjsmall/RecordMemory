@@ -100,6 +100,7 @@ class MainActivity : ComponentActivity() {
                     onAcceptSummary = model::acceptSummary,
                     onConfirmMemory = model::confirmMemory,
                     onForgetMemory = model::forgetMemory,
+                    onAllowMemoryRelearning = model::allowMemoryRelearning,
                     onDisableMemory = model::disableMemory,
                     onCorrectMemory = model::correctMemory,
                     onMergeMemory = model::mergeMemory,

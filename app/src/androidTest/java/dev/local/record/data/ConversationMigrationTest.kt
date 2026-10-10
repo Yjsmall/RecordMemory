@@ -9,6 +9,29 @@ import org.junit.Test
 class ConversationMigrationTest {
     @get:Rule val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), RecordDatabase::class.java)
 
+    @Test fun structuredUpgradeKeepsUnknownFieldsUnknownAndPreservesTombstones() {
+        val name = "structured-memory-migration-4-5"
+        InstrumentationRegistry.getInstrumentation().targetContext.deleteDatabase(name)
+        helper.createDatabase(name, 4).use { db ->
+            db.execSQL("INSERT INTO memories VALUES ('m', 2, 'PREFERENCE', 'CONFIRMED', '旧偏好', '依据', 'body', '', 'source', '', 'c', 't')")
+            db.execSQL("INSERT INTO memories VALUES ('f', 3, 'PREFERENCE', 'FORGOTTEN', '', '', 'gone', '', 'source', 'hash', 'c', 't')")
+        }
+        helper.runMigrationsAndValidate(name, 5, true, MIGRATION_4_5).use { db ->
+            db.query("SELECT text, factJson, changeJson, suppressionKey FROM memories WHERE id = 'm'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("旧偏好", cursor.getString(0))
+                org.junit.Assert.assertTrue(cursor.isNull(1))
+                org.junit.Assert.assertTrue(cursor.isNull(2))
+                assertEquals("", cursor.getString(3))
+            }
+            db.query("SELECT status, fingerprint FROM memories WHERE id = 'f'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("FORGOTTEN", cursor.getString(0))
+                assertEquals("hash", cursor.getString(1))
+            }
+        }
+    }
+
     @Test fun versionTwoMemoriesAndContentSurviveUpgrade() {
         val name = "conversation-migration-2-3"
         InstrumentationRegistry.getInstrumentation().targetContext.deleteDatabase(name)

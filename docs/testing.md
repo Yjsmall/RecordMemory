@@ -18,6 +18,8 @@ Detekt 聚焦协程、危险空值／类型转换、不可达代码、异常吞�
 
 ## vivo 手机验证
 
+0.4.3 结构化记忆、冲突审核、替代／多来源、范围遗忘和 Room 4→5 的实际范围与测试见 [结构化记忆交付](structured-memory-delivery.md)。普通消息整理仍需主动触发和审核，不等于已开启自动学习。
+
 0.4.1 独立记忆整理、证据与任务事务、Room 3→4 迁移、删除／中断／重建和助手概览的实际测试范围见 [记忆系统第一版](memory-system-delivery.md)。这是手动触发的候选整理，完整 agent 与自动记忆尚未接入。
 
 0.4.0 新增对话事件／删除／取消与重试、记忆版本保护、Room 1/2 → 3 迁移、HTTPS 多轮 Responses／Chat Completions、确认记忆后使用及忘记后排除历史、助手输入与候选操作、Activity 重建和窄宽窗／大字体／紧凑深色截图。使用方法和专项 vivo 步骤见 [私人助手交付](personal-assistant-delivery.md)。

@@ -3,6 +3,15 @@ package dev.local.record.data
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE memories ADD COLUMN factJson TEXT DEFAULT NULL")
+        db.execSQL("ALTER TABLE memories ADD COLUMN changeJson TEXT DEFAULT NULL")
+        db.execSQL("ALTER TABLE memories ADD COLUMN suppressionKey TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE memories ADD COLUMN suppressionLabel TEXT NOT NULL DEFAULT ''")
+    }
+}
+
 val MIGRATION_3_4 = object : Migration(3, 4) {
     override fun migrate(db: SupportSQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS `memory_planning` (`id` TEXT NOT NULL, `version` INTEGER NOT NULL, `turnId` TEXT NOT NULL, `requestContentId` TEXT NOT NULL, `status` TEXT NOT NULL, `candidateCount` INTEGER NOT NULL, `failure` TEXT, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")

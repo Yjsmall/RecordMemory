@@ -15,6 +15,7 @@ import dev.local.record.data.ConversationRepository
 import dev.local.record.data.MIGRATION_1_2
 import dev.local.record.data.MIGRATION_2_3
 import dev.local.record.data.MIGRATION_3_4
+import dev.local.record.data.MIGRATION_4_5
 import dev.local.record.data.MemoryPlanningRepository
 import dev.local.record.data.ProcessingRepository
 import dev.local.record.data.RecordDatabase
@@ -37,7 +38,7 @@ class RecordApplication : Application() {
 /** Process-scoped dependencies and live session; recovery never opens the microphone. */
 @Singleton
 class AppGraph @Inject constructor(@ApplicationContext context: Context) {
-    val database = Room.databaseBuilder(context, RecordDatabase::class.java, "record.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
+    val database = Room.databaseBuilder(context, RecordDatabase::class.java, "record.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
     val repository = RecordingRepository(database)
     val processing = ProcessingRepository(database)
     val settingsRepository = SettingsRepository(context)
