@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 
 enum class MemoryPlanningStatus { REQUESTED, RUNNING, COMPLETED, FAILED, CANCELLED }
 
-/** A manually authorized, single paid attempt. Retrying creates a new task. */
+/** A single authorized paid attempt. Background/manual origin is kept in its deletable input. */
 data class MemoryPlanningTask(
     val id: String,
     val version: Int = 0,

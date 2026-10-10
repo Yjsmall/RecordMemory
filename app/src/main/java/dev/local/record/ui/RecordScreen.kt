@@ -256,7 +256,9 @@ fun RecordScreen(
                 }
                 entry<SettingsPage> {
                     settingsModel?.let { model ->
-                        SettingsFrame("设置", settingsState, session, false, { backStack.removeLastOrNull() }, null, onPause, onStop) {
+                        SettingsFrame(settingsState.agentPage?.label ?: "设置", settingsState, session, settingsState.soulDirty, {
+                            if (settingsState.agentPage != null) model.closeAgentPage() else backStack.removeLastOrNull()
+                        }, if (settingsState.soulDirty) ({ model.saveSoul() }) else null, onPause, onStop) {
                             SettingsHome(
                                 settingsState,
                                 model,

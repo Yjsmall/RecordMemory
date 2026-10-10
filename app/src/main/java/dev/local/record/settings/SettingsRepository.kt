@@ -16,7 +16,10 @@ import javax.crypto.spec.GCMParameterSpec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** One atomic encrypted file binds connection configuration and credentials together. */
 class SettingsRepository(
@@ -25,6 +28,7 @@ class SettingsRepository(
     keyAlias: String = "record.ai.settings.v1",
     scope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 ) {
+    private val agentAuthorization = Mutex()
     private val store = DataStoreFactory.create(
         serializer = EncryptedSettingsSerializer(keyAlias),
         scope = scope,
@@ -47,18 +51,19 @@ class SettingsRepository(
                 !key.isNullOrBlank() -> current.apiKeys + (connection.id to key.trim())
                 else -> current.apiKeys
             }
-            PrivateSettings(config, keys)
+            current.copy(configuration = config, apiKeys = keys)
         }
     }
 
     suspend fun deleteConnection(id: String) {
         store.updateData { current ->
-            PrivateSettings(
-                current.configuration.copy(
+            current.copy(
+                configuration = current.configuration.copy(
                     connections = current.configuration.connections.filterNot { it.id == id },
                     bindings = current.configuration.bindings.map { if (it.connectionId == id) it.copy(connectionId = null, model = "") else it }
                 ),
-                current.apiKeys - id
+                apiKeys = current.apiKeys - id,
+                agent = current.agent.copy(toolChecks = current.agent.toolChecks.filterKeys { !it.startsWith("$id:") })
             )
         }
     }
@@ -81,6 +86,40 @@ class SettingsRepository(
 
     suspend fun merge(incoming: AiConfiguration) {
         store.updateData { it.copy(configuration = ConfigurationCodec.merge(it.configuration, incoming)) }
+    }
+
+    suspend fun saveSoul(soul: String?) {
+        require(soul == null || soul.isNotBlank()) { "请输入身份内容，或恢复内置默认" }
+        require(soul == null || soul.toByteArray(Charsets.UTF_8).size <= 32 * 1024) { "身份内容不能超过 32 KiB" }
+        store.updateData { it.copy(agent = it.agent.copy(soul = soul)) }
+    }
+
+    suspend fun setSkillEnabled(id: String, enabled: Boolean) {
+        require(id.matches(Regex("[a-z0-9]+(?:-[a-z0-9]+)*")) && id.length <= 64) { "技能 ID 无效" }
+        agentAuthorization.withLock {
+            store.updateData { it.copy(agent = it.agent.copy(skillStates = it.agent.skillStates + (id to enabled))) }
+        }
+    }
+
+    suspend fun setAutoLearning(enabled: Boolean) {
+        agentAuthorization.withLock {
+            store.updateData { it.copy(agent = it.agent.copy(autoLearning = enabled)) }
+        }
+    }
+
+    /** Serializes revocation with a final business commit using the latest preferences. */
+    suspend fun <T> withAgentAuthorization(check: (AssistantPreferences) -> Boolean, block: suspend () -> T): T =
+        agentAuthorization.withLock {
+            require(check(settings.first().agent)) { "助手授权已关闭，不能继续提交结果" }
+            block()
+        }
+
+    /** Empty values clear a failed or invalidated probe; claims are never exported. */
+    suspend fun recordToolCheck(key: String, value: String) {
+        require(key.length <= 301 && value.length <= 128) { "工具检查结果无效" }
+        store.updateData {
+            it.copy(agent = it.agent.copy(toolChecks = if (value.isEmpty()) it.agent.toolChecks - key else it.agent.toolChecks + (key to value)))
+        }
     }
 }
 

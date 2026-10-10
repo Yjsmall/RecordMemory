@@ -3,6 +3,7 @@ package dev.local.record.ai
 import dev.local.record.settings.AiConnection
 import dev.local.record.settings.CapabilityBinding
 import dev.local.record.settings.DOUBAO_ASR
+import dev.local.record.settings.OPENAI_COMPATIBLE
 import dev.local.record.settings.RESPONSES
 import dev.local.record.settings.endpoint
 import dev.local.record.settings.httpError
@@ -14,11 +15,15 @@ import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 
@@ -44,6 +49,56 @@ class AiGateway internal constructor(
         val body = conversationBody(connection, binding, messages)
         val source = post(endpoint(connection, path), connection, apiKey, body.toByteArray(), "application/json; charset=utf-8", 60_000, null)
         parseDiagnosticOutput(connection.protocol, source)
+    }
+
+    /** One native tool interaction. The caller owns dispatch, authorization, and the overall budget. */
+    suspend fun agentStep(
+        connection: AiConnection,
+        binding: CapabilityBinding,
+        apiKey: String?,
+        messages: List<AssistantMessage>,
+        tools: List<AgentToolDefinition>,
+        exchanges: List<AgentExchange> = emptyList()
+    ): AgentModelReply = requestAgentStep(connection, binding, apiKey, messages, tools, exchanges)
+
+    /** Proves only a fixed synthetic echo round trip; private prompts and user data are never sent. */
+    suspend fun probeTools(connection: AiConnection, binding: CapabilityBinding, apiKey: String?): Boolean {
+        if (connection.protocol !in setOf(RESPONSES, OPENAI_COMPATIBLE)) return false
+        return try {
+            withTimeoutOrNull(60_000) {
+                val tool = AgentToolDefinition(
+                    "record_echo_probe",
+                    "Echo a fixed synthetic value for protocol verification.",
+                    Json.parseToJsonElement("""{"type":"object","properties":{"value":{"type":"string","enum":["synthetic"]}},"required":["value"],"additionalProperties":false}""").jsonObject
+                )
+                val synthetic = binding.copy(prompt = "Call record_echo_probe once with value synthetic. After the tool returns, output exactly its result and no other text.")
+                val messages = listOf(AssistantMessage("user", "Verify the echo tool protocol using synthetic data."))
+                val first = requestAgentStep(connection, synthetic, apiKey, messages, listOf(tool), emptyList(), tool.name)
+                val call = first.calls.singleOrNull() ?: return@withTimeoutOrNull false
+                if (call.name != tool.name || call.arguments != Json.parseToJsonElement("""{"value":"synthetic"}""").jsonObject) return@withTimeoutOrNull false
+                val second = requestAgentStep(connection, synthetic, apiKey, messages, listOf(tool), listOf(AgentExchange(first, listOf(AgentToolResult(call, "record-probe-success")))))
+                second.calls.isEmpty() && second.text.trim() == "record-probe-success"
+            } ?: false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private suspend fun requestAgentStep(
+        connection: AiConnection,
+        binding: CapabilityBinding,
+        apiKey: String?,
+        messages: List<AssistantMessage>,
+        tools: List<AgentToolDefinition>,
+        exchanges: List<AgentExchange>,
+        forcedToolName: String? = null
+    ): AgentModelReply = withContext(Dispatchers.IO) {
+        val body = agentRequestBody(connection, binding, messages, tools, exchanges, forcedToolName)
+        val path = if (connection.protocol == RESPONSES) connection.responsesPath else connection.chatPath
+        val source = post(endpoint(connection, path), connection, apiKey, body.toByteArray(), "application/json; charset=utf-8", 60_000, null)
+        parseAgentReply(connection.protocol, source)
     }
 
     private suspend fun openAi(connection: AiConnection, binding: CapabilityBinding, apiKey: String?, audio: File): String {

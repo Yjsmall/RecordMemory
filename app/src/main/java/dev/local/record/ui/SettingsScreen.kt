@@ -92,6 +92,21 @@ fun SettingsHome(state: SettingsUiState, model: SettingsViewModel, onConnection:
         Text(state.loadError ?: "正在读取设置…")
         return
     }
+    val context = LocalContext.current
+    val agentCatalog = remember(context) { dev.local.record.agent.BuiltInAgentCatalog(context.assets::open) }
+    LaunchedEffect(agentCatalog) { model.loadAgentCatalog(agentCatalog) }
+    if (state.agentPage != null) {
+        AgentSettingsContent(state, model, onCapability)
+        return
+    }
+    SectionLabel("助手")
+    SettingsGroup {
+        SettingsRow("身份", "交流风格与稳定偏好", RecordIcons.Chat, "agent-identity", !state.busy) { model.openAgentPage(AgentSettingsPage.IDENTITY) }
+        GroupDivider()
+        SettingsRow("技能", "周回顾、项目梳理、行动规划", RecordIcons.Spark, "agent-skills", !state.busy) { model.openAgentPage(AgentSettingsPage.SKILLS) }
+        GroupDivider()
+        SettingsRow("记忆方式", if (state.agentPreferences.autoLearning) "自动整理，人工审核" else "手动整理", RecordIcons.Memory, "agent-memory", !state.busy) { model.openAgentPage(AgentSettingsPage.MEMORY) }
+    }
     SectionLabel("AI 服务", "${config.connections.size} 个")
     SettingsGroup {
         config.connections.forEach { connection ->

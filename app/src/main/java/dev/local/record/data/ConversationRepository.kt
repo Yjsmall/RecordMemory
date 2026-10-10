@@ -27,6 +27,10 @@ class ConversationRepository(private val db: RecordDatabase) {
     suspend fun turn(id: String) = dao.turn(id)?.domain()
     suspend fun turns(id: String) = dao.turns(id).map(AssistantTurnRow::domain)
     suspend fun context(id: String): AssistantContext? = content.content(id)?.body?.let { eventJson.decodeFromString<AssistantContext>(it) }
+    suspend fun memoryRevision(): Long = events.memoryRevision()
+
+    /** Only retained evidence attached to the caller's validated confirmed memory is readable. */
+    suspend fun sourceText(id: String): String? = content.content(id)?.body
 
     suspend fun create(id: String, now: Long) = db.withTransaction {
         val existing = dao.conversation(id)?.domain()
@@ -78,7 +82,30 @@ class ConversationRepository(private val db: RecordDatabase) {
     } && snapshot.historyMemories.all { reference ->
         val memory = content.memory(reference.id)?.domain()
         memory?.version == reference.version && memory.visible && (memory.fact?.effectiveAt(System.currentTimeMillis()) != false)
-    } && snapshot.historyTurnIds.all { turn(it)?.status == TurnStatus.ANSWERED }
+    } && snapshot.historyTurnIds.all { turn(it)?.status == TurnStatus.ANSWERED } &&
+        (snapshot.memoryRevision == null || snapshot.memoryRevision == events.memoryRevision()) &&
+        snapshot.sourceContentIds.all { content.content(it) != null }
+
+    /** Tool receipt and newly used dependencies are committed together before returning to the model. */
+    suspend fun completeTool(id: String, attempt: Int, callId: String, receipt: String, memories: List<dev.local.record.domain.MemoryReference>, sourceContentIds: List<String>, now: Long): Boolean = db.withTransaction {
+        require(callId.isNotBlank() && callId.length <= 200 && callId.none(Char::isISOControl) && receipt.length <= 16_000)
+        val state = turn(id) ?: return@withTransaction false
+        if (state.status != TurnStatus.RUNNING || state.attempt != attempt) return@withTransaction false
+        val snapshot = state.contextContentId?.let { context(it) } ?: return@withTransaction false
+        val receiptId = "$id:tool:$attempt:$callId"
+        content.content(receiptId)?.let { previous ->
+            require(previous.body == receipt) { "工具回执参数已变化" }
+            return@withTransaction snapshotIsValid(snapshot)
+        }
+        require(snapshot.toolReceiptIds.size < 6) { "本轮工具调用超过限额" }
+        val next = snapshot.copy(memories = (snapshot.memories + memories).distinct(), sourceContentIds = (snapshot.sourceContentIds + sourceContentIds).distinct(), toolReceiptIds = snapshot.toolReceiptIds + receiptId)
+        if (!snapshotIsValid(next)) return@withTransaction false
+        val contextId = "$id:context:$attempt:tool:${state.version + 1}"
+        content.saveContent(ContentRow(receiptId, "agent-tool-receipt", receipt, now))
+        content.saveContent(ContentRow(contextId, "chat-context", eventJson.encodeToString(next), now))
+        commitTurn(id, TurnEvent.ToolCompleted(attempt, callId, contextId, receiptId), now)
+        true
+    }
 
     suspend fun answer(id: String, attempt: Int, reply: String, memories: List<MemoryDraft>, now: Long): Boolean = db.withTransaction {
         val state = turn(id) ?: return@withTransaction false
@@ -123,7 +150,7 @@ class ConversationRepository(private val db: RecordDatabase) {
         // Historic failed attempts and custom prompts are also deletable content.
         events.events().filter { it.aggregateType == "AssistantTurn" && it.correlationId == id }.forEach { row ->
             val payload = eventJson.parseToJsonElement(row.payload).jsonObject
-            listOf("userContentId", "contextContentId", "replyContentId").forEach { key -> payload[key]?.jsonPrimitive?.content?.let { content.deleteContent(it) } }
+            listOf("userContentId", "contextContentId", "replyContentId", "receiptContentId").forEach { key -> payload[key]?.jsonPrimitive?.content?.let { content.deleteContent(it) } }
         }
     }
 
@@ -148,7 +175,7 @@ class ConversationRepository(private val db: RecordDatabase) {
         }
         history.filter { it.aggregateId in affected }.forEach { row ->
             val payload = eventJson.parseToJsonElement(row.payload).jsonObject
-            listOf("contextContentId", "replyContentId").forEach { key -> payload[key]?.jsonPrimitive?.content?.let { content.deleteContent(it) } }
+            listOf("contextContentId", "replyContentId", "receiptContentId").forEach { key -> payload[key]?.jsonPrimitive?.content?.let { content.deleteContent(it) } }
         }
     }
 

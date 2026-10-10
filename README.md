@@ -6,7 +6,7 @@
 
 0.4.3 增加结构化主体、事实范围、日期与多来源；记忆整理可提出新增、补充依据、替代旧事实和澄清问题，全部经审核提交。忘记结构化事实会阻止同范围的新候选，并提供明确的重新学习入口。删除部分来源保留仍有有效证据的事实，过期事实退出当前画像。详见 [结构化记忆交付](docs/structured-memory-delivery.md)。私人助手使用独立的「记忆提取」模型；聊天不顺带保存记忆，未配置记忆模型仍可聊天和手动记住。历史版本见 [记忆系统第一版](docs/memory-system-delivery.md)、[复审与加固](docs/memory-system-review.md) 和 [私人助手交付](docs/personal-assistant-delivery.md)。
 
-SOUL.md 身份、应用内置且可启用／禁用的 skills、工具调用主动回忆与完整记忆方案见 [私人助手架构](docs/architecture/personal-agent.md) 和 [内置资源模板](docs/examples/agent-workspace/README.md)。独立候选整理和首批结构化能力已落地，身份／技能／工具循环与持续学习仍待实现。
+0.4.4 接入应用内身份编辑、三项内置技能与开关、经过真实工具探测的主动回忆，以及默认关闭的自动候选整理。设置 → 助手提供身份、技能、记忆方式三个入口；对话可输入 `/weekly-review`、`/project-review`、`/personal-planning` 明确选用技能。自动整理使用独立 MEMORY 模型，结果仍需审核。实际范围与验证见 [助手功能接入](docs/personal-agent-integration-delivery.md)；目标设计见 [私人助手架构](docs/architecture/personal-agent.md)。
 
 保存录音后可转写、生成标题／总结和记忆候选；开启自动处理且配置有效服务后会上传音频与相关文本。关闭自动处理时只在详情中手动触发。对话只在主动发送或重试时上传所选上下文，不自动重试。详见 [录音 AI 功能](docs/feature-review-delivery.md)。
 

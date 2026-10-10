@@ -5,10 +5,15 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import dev.local.record.agent.BuiltInAgentCatalog
+import dev.local.record.agent.BuiltInSkill
+import dev.local.record.ai.AiGateway
+import dev.local.record.ai.toolConfigurationFingerprint
 import dev.local.record.settings.AiCapability
 import dev.local.record.settings.AiConfiguration
 import dev.local.record.settings.AiConnection
 import dev.local.record.settings.AppAppearance
+import dev.local.record.settings.AssistantPreferences
 import dev.local.record.settings.CapabilityBinding
 import dev.local.record.settings.ConfigurationCodec
 import dev.local.record.settings.ConnectionCheck
@@ -53,7 +58,16 @@ data class SettingsUiState(
     val check: ConnectionCheck? = null,
     val message: String? = null,
     val loadError: String? = null,
-    val pendingImport: AiConfiguration? = null
+    val pendingImport: AiConfiguration? = null,
+    val agentPreferences: AssistantPreferences = AssistantPreferences(),
+    val agentPage: AgentSettingsPage? = null,
+    val agentSkills: List<BuiltInSkill> = emptyList(),
+    val defaultSoul: String = "",
+    val soulDraft: String? = null,
+    val soulDirty: Boolean = false,
+    val agentCatalogError: String? = null,
+    val probingTools: Boolean = false,
+    val agentMemoryConfigured: Boolean = false
 )
 
 /** Activity-scoped drafts survive folding and recreation; credentials never enter saved-state bundles. */
@@ -69,7 +83,7 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
             try {
                 repository.settings.collect {
                     privateSettings = it
-                    mutable.value = mutable.value.copy(configuration = it.configuration)
+                    mutable.value = mutable.value.copy(configuration = it.configuration, agentPreferences = it.agent, agentMemoryConfigured = hasConfiguredMemory(it))
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -179,7 +193,7 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
         checkGeneration++
         checkJob?.cancel()
         checkJob = null
-        mutable.value = mutable.value.copy(checking = false, testingModel = false)
+        mutable.value = mutable.value.copy(checking = false, testingModel = false, probingTools = false)
     }
 
     fun testTextModel() {
@@ -205,6 +219,96 @@ class SettingsViewModel(private val repository: SettingsRepository) : ViewModel(
     fun appearance(appearance: AppAppearance, dynamic: Boolean) = operation { repository.appearance(appearance, dynamic) }
 
     fun processingMode(auto: Boolean) = operation { repository.processingMode(if (auto) ProcessingMode.AUTO else ProcessingMode.MANUAL) }
+
+    fun loadAgentCatalog(catalog: BuiltInAgentCatalog) {
+        viewModelScope.launch {
+            try {
+                val resources = withContext(Dispatchers.IO) { catalog.defaultSoul to catalog.skills }
+                mutable.value = mutable.value.copy(
+                    defaultSoul = resources.first,
+                    agentSkills = resources.second,
+                    agentCatalogError = null,
+                    soulDraft = if (mutable.value.agentPage == AgentSettingsPage.IDENTITY && !mutable.value.soulDirty) privateSettings.agent.soul ?: resources.first else mutable.value.soulDraft
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                mutable.value = mutable.value.copy(agentCatalogError = "内置助手资源校验失败，技能暂不可用")
+            }
+        }
+    }
+
+    fun openAgentPage(page: AgentSettingsPage) {
+        cancelCheck()
+        mutable.value = mutable.value.copy(
+            agentPage = page,
+            soulDraft = if (page == AgentSettingsPage.IDENTITY) privateSettings.agent.soul ?: mutable.value.defaultSoul else null,
+            soulDirty = false,
+            message = null
+        )
+    }
+
+    fun closeAgentPage() {
+        cancelCheck()
+        mutable.value = mutable.value.copy(agentPage = null, soulDraft = null, soulDirty = false, message = null)
+    }
+
+    fun updateSoul(value: String) {
+        mutable.value = mutable.value.copy(soulDraft = value, soulDirty = value != (privateSettings.agent.soul ?: mutable.value.defaultSoul), message = null)
+    }
+
+    fun restoreDefaultSoul() = updateSoul(mutable.value.defaultSoul)
+
+    fun usePreviousAnswerPrompt() = updateSoul(privateSettings.configuration.binding(AiCapability.ANSWER).prompt)
+
+    fun saveSoul(onSaved: () -> Unit = {}) = operation {
+        val draft = mutable.value.soulDraft ?: return@operation
+        repository.saveSoul(draft.takeUnless { it == mutable.value.defaultSoul })
+        mutable.value = mutable.value.copy(soulDirty = false, message = "助手身份已保存，下次对话生效")
+        onSaved()
+    }
+
+    fun setSkillEnabled(id: String, enabled: Boolean) = operation {
+        require(mutable.value.agentSkills.any { it.id == id }) { "此技能不存在" }
+        repository.setSkillEnabled(id, enabled)
+    }
+
+    fun setAutoLearning(enabled: Boolean) = operation {
+        if (enabled) {
+            require(hasConfiguredMemory(privateSettings)) { "请先配置记忆提取模型与所需密钥" }
+        }
+        repository.setAutoLearning(enabled)
+    }
+
+    private fun hasConfiguredMemory(settings: PrivateSettings): Boolean {
+        val binding = settings.configuration.binding(AiCapability.MEMORY)
+        val connection = settings.configuration.connections.firstOrNull { it.id == binding.connectionId } ?: return false
+        return connection.supports(AiCapability.MEMORY) && binding.model.isNotBlank() && (!connection.bearerAuth || !settings.apiKeys[connection.id].isNullOrBlank())
+    }
+
+    fun probeTools() {
+        val binding = privateSettings.configuration.binding(AiCapability.ANSWER)
+        val connection = privateSettings.configuration.connections.firstOrNull { it.id == binding.connectionId } ?: return
+        if (binding.model.isBlank()) return
+        cancelCheck()
+        val generation = checkGeneration
+        mutable.value = mutable.value.copy(probingTools = true, message = null)
+        checkJob = viewModelScope.launch {
+            try {
+                val supported = AiGateway().probeTools(connection, binding, privateSettings.apiKeys[connection.id])
+                if (generation == checkGeneration) {
+                    repository.recordToolCheck("${connection.id}:${binding.model}", if (supported) toolConfigurationFingerprint(connection, binding) else "")
+                    mutable.value = mutable.value.copy(message = if (supported) "所选模型支持主动回忆与技能工具" else "所选模型未通过工具检查，将使用普通对话与明确选中的技能")
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (generation == checkGeneration) mutable.value = mutable.value.copy(message = checkError(error))
+            } finally {
+                if (generation == checkGeneration) mutable.value = mutable.value.copy(probingTools = false)
+            }
+        }
+    }
 
     fun export(resolver: ContentResolver, uri: Uri) = operation {
         val content = ConfigurationCodec.export(privateSettings.configuration)

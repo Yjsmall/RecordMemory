@@ -21,6 +21,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -85,7 +87,7 @@ fun parseMemoryPlan(source: String, userText: String, allowLegacy: Boolean = tru
     }.distinctBy { dev.local.record.domain.memoryFingerprint(it.text) }
 }
 
-/** Single manually authorized request, independent of ANSWER. Owned by the process, not Activity. */
+/** Single authorized attempt, independent of ANSWER. Owned by the process, not Activity. */
 class MemoryPlanner(
     private val plans: MemoryPlanningRepository,
     private val conversations: ConversationRepository,
@@ -96,28 +98,39 @@ class MemoryPlanner(
     private val timeoutMillis: Long = 120_000
 ) {
     private val active = java.util.concurrent.ConcurrentHashMap<String, Job>()
+    private val automaticJobs = mutableSetOf<String>()
     private val execution = Mutex()
 
     init {
         require(timeoutMillis > 0)
     }
 
-    suspend fun request(turnId: String) {
+    suspend fun request(turnId: String, automatic: Boolean = false): Job? {
         val configuration = settings.settings.first()
+        if (automatic && !configuration.agent.autoLearning) return null
         val binding = configuration.configuration.binding(AiCapability.MEMORY)
         val connection = configuration.configuration.connections.firstOrNull { it.id == binding.connectionId }
         require(connection != null && connection.supports(AiCapability.MEMORY) && binding.model.isNotBlank() && (!connection.bearerAuth || !configuration.apiKeys[connection.id].isNullOrBlank())) { "请在模型与能力中配置记忆提取模型" }
         val turn = requireNotNull(conversations.turn(turnId))
         val memories = selectAssistantMemories(processing.memories(), turn.userText).take(10).map { MemoryReference(it.id, it.version) }
-        val task = plans.request(turnId, connection, binding, memories, System.currentTimeMillis())
-        if (task.status != MemoryPlanningStatus.REQUESTED) return
-        synchronized(active) {
-            if (active[task.id]?.isActive == true) return
-            active[task.id] = scope.launch(start = CoroutineStart.LAZY) { execute(task.id) }.also { it.start() }
+        val task = plans.request(turnId, connection, binding, memories, System.currentTimeMillis(), automatic)
+        val automaticTask = plans.input(task)?.automatic == true
+        if (automatic && !automaticTask) return null
+        if (task.status != MemoryPlanningStatus.REQUESTED) return null
+        if (automaticTask && !settings.settings.first().agent.autoLearning) {
+            plans.cancel(task.id, System.currentTimeMillis())
+            return null
+        }
+        return synchronized(active) {
+            active[task.id]?.takeIf { it.isActive } ?: scope.launch(start = CoroutineStart.LAZY) { execute(task.id, automaticTask) }.also {
+                active[task.id] = it
+                if (automaticTask) automaticJobs.add(task.id)
+                it.start()
+            }
         }
     }
 
-    private suspend fun execute(id: String) {
+    private suspend fun execute(id: String, automatic: Boolean) {
         try {
             withTimeout(timeoutMillis) {
                 coroutineScope {
@@ -126,6 +139,13 @@ class MemoryPlanner(
                         plans.tasks.collect { tasks ->
                             if (tasks.firstOrNull { it.id == id }?.status in setOf(MemoryPlanningStatus.FAILED, MemoryPlanningStatus.CANCELLED)) owner?.cancel()
                         }
+                    }
+                    val authorization = if (automatic) {
+                        launch {
+                            settings.settings.collect { if (!it.agent.autoLearning) owner?.cancel() }
+                        }
+                    } else {
+                        null
                     }
                     try {
                         execution.withLock {
@@ -162,11 +182,30 @@ class MemoryPlanner(
                                 plans.fail(id, "SOURCE_CHANGED", System.currentTimeMillis())
                                 return@withLock
                             }
+                            if (automatic && !settings.settings.first().agent.autoLearning) {
+                                plans.cancel(id, System.currentTimeMillis())
+                                return@withLock
+                            }
+                            currentCoroutineContext().ensureActive()
                             val output = gateway.converse(input.connection, input.binding.copy(prompt = prompt), key, listOf(AssistantMessage("user", data)))
-                            plans.complete(id, parseMemoryPlan(output, turn.userText, allowLegacy = false), System.currentTimeMillis())
+                            if (automatic && !settings.settings.first().agent.autoLearning) {
+                                plans.cancel(id, System.currentTimeMillis())
+                                return@withLock
+                            }
+                            currentCoroutineContext().ensureActive()
+                            val items = parseMemoryPlan(output, turn.userText, allowLegacy = false)
+                            settings.withAgentAuthorization({ preferences ->
+                                (!input.automatic || preferences.autoLearning).also { allowed ->
+                                    if (!allowed) throw CancellationException("自动整理授权已关闭")
+                                }
+                            }) {
+                                currentCoroutineContext().ensureActive()
+                                plans.complete(id, items, System.currentTimeMillis())
+                            }
                         }
                     } finally {
                         watcher.cancel()
+                        authorization?.cancel()
                     }
                 }
             }
@@ -185,13 +224,24 @@ class MemoryPlanner(
             plans.fail(id, reason, System.currentTimeMillis())
         } finally {
             val owner = kotlinx.coroutines.currentCoroutineContext()[Job]
-            synchronized(active) { if (active[id] == owner) active.remove(id) }
+            synchronized(active) {
+                if (active[id] == owner) {
+                    active.remove(id)
+                    automaticJobs.remove(id)
+                }
+            }
         }
     }
 
     suspend fun cancel(id: String) {
         plans.cancel(id, System.currentTimeMillis())
         active[id]?.cancel()
+    }
+
+    /** Cancel queued and running background attempts without stopping explicit requests. */
+    suspend fun cancelAutomatic() {
+        synchronized(active) { automaticJobs.mapNotNull { active[it] }.forEach { it.cancel() } }
+        plans.cancelAutomatic(System.currentTimeMillis())
     }
 }
 

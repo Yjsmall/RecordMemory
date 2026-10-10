@@ -1,12 +1,12 @@
 # 私人助手：身份、技能与记忆架构
 
-日期：2026-10-10。状态：**目标架构；0.4.3 已实现独立手动整理、首批结构化事实、冲突审核、替代／多来源和范围抑制，其余按阶段建设**。实际范围与验证见 [结构化记忆交付](../structured-memory-delivery.md)、[记忆系统第一版](../memory-system-delivery.md) 与 [复审加固](../memory-system-review.md)。本文依据用户提出的 SOUL.md、应用内置且可启用／禁用的 skills、持续了解用户的私人助手需求；补充 [记忆 agent 调研](../memory-agent-research.md) 与 [事件架构](event-sourcing.md)。内置资源示例见 [模板说明](../examples/agent-workspace/README.md)。用户已明确技能随软件内置，取消先前的用户选目录方案。
+日期：2026-10-10。状态：**目标架构；0.4.4 接入身份编辑、内置技能、工具主动回忆和可选自动候选整理；自动确认与历史后台批次仍待建设**。最新实际范围与验证见 [助手功能接入](../personal-agent-integration-delivery.md)，此前见 [结构化记忆交付](../structured-memory-delivery.md)、[记忆系统第一版](../memory-system-delivery.md) 与 [复审加固](../memory-system-review.md)。本文依据用户提出的 SOUL.md、应用内置且可启用／禁用的 skills、持续了解用户的私人助手需求；补充 [记忆 agent 调研](../memory-agent-research.md) 与 [事件架构](event-sourcing.md)。内置资源示例见 [模板说明](../examples/agent-workspace/README.md)。用户已明确技能随软件内置，取消先前的用户选目录方案。
 
 ## 1. 选择与当前基础
 
 采用 **Kotlin 原生轻量 AgentRuntime**，沿用 Room、现有多 provider 配置、业务事件与本机文本搜索。借鉴 OpenClaw 的工作区／身份文件和 Agent Skills 的渐进加载，借鉴 LangMem 的记忆整理接口与 Memobase 的画像／时间线。不把 Node／Python agent 服务嵌入 APK，也不为此更换 Android 工具链。
 
-0.4.0 已有私人助手入口、多轮聊天、已确认记忆上下文、候选审核、纠正／忘记与版本保护。独立 `MemoryPlanner` 使用 MEMORY 绑定、用户手动触发和默认候选策略，整理任务事件可重建并在进程重启后标为中断；0.4.2 加固派生正文清理与在途取消。0.4.3 对话规划采用 schemaVersion 2、ADD／REINFORCE／SUPERSEDE／ASK_USER／IGNORE，新增登记谓词、主体与日期、来源撤销和范围抑制。仍没有内置技能目录／开关、主动记忆工具循环、任意主题语义删除或自动学习。支持 Responses／Chat Completions 不代表已经支持 function calling。下文是目标设计，未逐项声明落地的模块、事件名、技能加载和 UI 仍为拟建能力。
+0.4.0 已有私人助手入口、多轮聊天、已确认记忆上下文、候选审核、纠正／忘记与版本保护。独立 `MemoryPlanner` 使用 MEMORY 绑定、用户手动触发和默认候选策略，整理任务事件可重建并在进程重启后标为中断；0.4.2 加固派生正文清理与在途取消。0.4.3 对话规划采用 schemaVersion 2、ADD／REINFORCE／SUPERSEDE／ASK_USER／IGNORE，新增登记谓词、主体与日期、来源撤销和范围抑制。0.4.4 增加 APK 技能目录、加密身份／开关、Responses／Chat 原生工具协议及有限循环，自动整理只处理开启后新完成的对话并产生候选。工具需要用户主动探测，协议名称不表示工具能力已验证。仍没有任意主题语义删除、自动确认事实或历史后台整理。下文其余目标能力须以交付文档为准。
 
 目标是让助手能回答「你知道我的哪些习惯」「结合我正在做的项目给建议」「用已启用的技能做周回顾」，并准确更新变化，解释依据，遵守忘记要求。先做一个可靠的个人 agent，不增加多 agent 协作。
 
@@ -29,7 +29,7 @@
 
 ## 3. 应用内置资源与技能开关
 
-开发者在工程的 `app/src/main/assets/agent/` 中维护身份默认值、运行约定和技能包，随 APK 一起发布。这里是拟采用的资源路径，当前示例仍在文档目录；不是让用户在手机上创建的工作区。不提供目录选择、SAF 授权、外部扫描或文件导入入口。
+开发者在工程的 `app/src/main/assets/agent/` 中维护身份默认值、运行约定和技能包，随 APK 一起发布。0.4.4 已采用该路径，文档目录仍保留参考示例。不是让用户在手机上创建的工作区。不提供目录选择、SAF 授权、外部扫描或文件导入入口。
 
 ```text
 app/src/main/assets/agent/

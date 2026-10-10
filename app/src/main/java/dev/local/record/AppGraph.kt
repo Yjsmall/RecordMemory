@@ -5,8 +5,10 @@ import android.content.Context
 import androidx.room.Room
 import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.android.qualifiers.ApplicationContext
+import dev.local.record.agent.BuiltInAgentCatalog
 import dev.local.record.ai.AiProcessor
 import dev.local.record.ai.AiScheduler
+import dev.local.record.ai.AutomaticMemoryLearning
 import dev.local.record.ai.MemoryPlanner
 import dev.local.record.ai.PersonalAssistant
 import dev.local.record.audio.RecordingRecovery
@@ -48,15 +50,18 @@ class AppGraph @Inject constructor(@ApplicationContext context: Context) {
     val session = MutableStateFlow(SessionState())
     private val recoveryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val conversations = ConversationRepository(database)
-    val assistant = PersonalAssistant(conversations, processing, settingsRepository, recoveryScope)
+    val agentCatalog = BuiltInAgentCatalog { context.assets.open(it) }
     val memoryPlanning = MemoryPlanningRepository(database)
     val memoryPlanner = MemoryPlanner(memoryPlanning, conversations, processing, settingsRepository, recoveryScope)
+    val automaticLearning = AutomaticMemoryLearning(conversations, memoryPlanning, memoryPlanner, settingsRepository, recoveryScope)
+    val assistant = PersonalAssistant(conversations, processing, settingsRepository, recoveryScope, catalog = agentCatalog, onAnswered = automaticLearning::onAnswered)
     private val recovery = recoveryScope.async<List<String>> {
         val messages = RecordingRecovery(repository, audioDirectory).recover(System.currentTimeMillis())
         processing.releaseLeases()
         conversations.recoverInterrupted(System.currentTimeMillis())
         conversations.purgeWithdrawnMemoryContent(System.currentTimeMillis())
         memoryPlanning.recoverInterrupted(System.currentTimeMillis())
+        automaticLearning.start()
         scheduler.kick()
         messages
     }

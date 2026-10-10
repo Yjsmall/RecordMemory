@@ -108,7 +108,19 @@ data class AiConfiguration(
 
 /** Kept only in the encrypted local DataStore, never in portable configuration or events. */
 @Serializable
-data class PrivateSettings(val configuration: AiConfiguration = AiConfiguration(), val apiKeys: Map<String, String> = emptyMap()) {
+data class AssistantPreferences(
+    val soul: String? = null,
+    val skillStates: Map<String, Boolean> = emptyMap(),
+    val autoLearning: Boolean = false,
+    val toolChecks: Map<String, String> = emptyMap()
+)
+
+@Serializable
+data class PrivateSettings(
+    val configuration: AiConfiguration = AiConfiguration(),
+    val apiKeys: Map<String, String> = emptyMap(),
+    val agent: AssistantPreferences = AssistantPreferences()
+) {
     override fun toString() = "PrivateSettings(credentials=redacted)"
 }
 

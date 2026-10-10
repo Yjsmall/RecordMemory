@@ -145,6 +145,9 @@ internal fun AssistantScreen(
                     TextButton(onClick = onStop, enabled = session.phase != dev.local.record.audio.SessionPhase.SAVING) { Text("停止保存") }
                 }
             }
+            if (state.configured && !state.activeRecallAvailable && !compact) {
+                Text("主动回忆未启用，可在设置 → 助手 → 记忆方式中测试模型工具能力", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
+            }
             LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth().testTag("assistant-messages"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
                 if (turns.isEmpty()) {
                     item {
@@ -367,6 +370,9 @@ internal fun turnFailureLabel(turn: AssistantTurn): String = when {
     turn.failure == "CONTEXT_CHANGED" -> "记忆已变化，请重试"
     turn.failure == "CONTEXT_WITHDRAWN" -> "相关记忆或来源已移除，旧回复已清理"
     turn.failure == "NETWORK" -> "连接失败，请稍后重试"
+    turn.failure == "CONTEXT_TOO_LONG" -> "身份、技能与记忆内容过长，请缩短助手身份后重试"
+    turn.failure == "SKILL_DISABLED" -> "所选技能已关闭，请到设置 → 助手 → 技能开启后重试"
+    turn.failure == "SKILL_UNAVAILABLE" -> "没有此内置技能，请到助手技能页查看可用名称"
     turn.failure == "CONFIG_OR_FORMAT" -> "请检查对话模型与回复格式"
     else -> "回复未完成，请检查服务后重试"
 }

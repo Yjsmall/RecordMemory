@@ -9,6 +9,8 @@ import dev.local.record.domain.MemoryStatus
 import dev.local.record.settings.AiCapability
 import dev.local.record.settings.AiConnection
 import dev.local.record.settings.CapabilityBinding
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -98,6 +100,52 @@ class MemoryPlanningRepositoryTest {
             assertEquals("INTERRUPTED", plans.task(interrupted.id)?.failure)
             RecordingRepository(db).rebuild()
             assertTrue(db.processing().pending().isEmpty())
+            assertTrue(ProcessingRepository(db).memories().isEmpty())
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test fun automaticRequestsAreUniqueAcrossConcurrentCallbacksFailureAndReplay() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), RecordDatabase::class.java).build()
+        try {
+            val conversations = ConversationRepository(db)
+            val plans = MemoryPlanningRepository(db)
+            answered(conversations)
+            val tasks = coroutineScope {
+                List(8) { async { plans.request("t", connection, binding, emptyList(), 5, automatic = true) } }.map { it.await() }
+            }
+            assertEquals(1, tasks.map { it.id }.distinct().size)
+            val task = tasks.first()
+            assertTrue(requireNotNull(plans.input(task)).automatic)
+            plans.recoverInterrupted(6)
+            assertEquals(task.id, plans.request("t", connection, binding, emptyList(), 7, automatic = true).id)
+            RecordingRepository(db).rebuild()
+            assertEquals(1, db.memoryPlanning().all().size)
+            assertTrue(requireNotNull(plans.input(requireNotNull(plans.task(task.id)))).automatic)
+            assertEquals(MemoryPlanningStatus.FAILED, plans.task(task.id)?.status)
+            val manual = plans.request("t", connection, binding, emptyList(), 8)
+            assertTrue(manual.id != task.id)
+            assertFalse(requireNotNull(plans.input(manual)).automatic)
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test fun disablingAutomaticPlanningCancelsOnlyItsDurablePendingTasks() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), RecordDatabase::class.java).build()
+        try {
+            val conversations = ConversationRepository(db)
+            val plans = MemoryPlanningRepository(db)
+            answered(conversations, "auto", "auto-conversation")
+            answered(conversations, "manual", "manual-conversation")
+            val automatic = plans.request("auto", connection, binding, emptyList(), 5, automatic = true)
+            val manual = plans.request("manual", connection, binding, emptyList(), 5)
+            plans.start(automatic.id, 6)
+            plans.cancelAutomatic(7)
+            assertEquals(MemoryPlanningStatus.CANCELLED, plans.task(automatic.id)?.status)
+            assertEquals(MemoryPlanningStatus.REQUESTED, plans.task(manual.id)?.status)
+            assertFalse(plans.complete(automatic.id, listOf(item), 8))
             assertTrue(ProcessingRepository(db).memories().isEmpty())
         } finally {
             db.close()

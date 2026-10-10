@@ -32,6 +32,8 @@ data class AssistantUiState(
     val memoryConfigured: Boolean = false,
     val memoryProvider: String = "",
     val memoryTasks: List<MemoryPlanningTask> = emptyList(),
+    val activeRecallAvailable: Boolean = false,
+    val autoLearning: Boolean = false,
     val ready: Boolean = false,
     val busy: Boolean = false,
     val problem: String? = null
@@ -67,7 +69,8 @@ class AssistantViewModel(private val graph: AppGraph) : ViewModel() {
                 val memoryBinding = settings.configuration.binding(AiCapability.MEMORY)
                 val memoryConnection = settings.configuration.connections.firstOrNull { it.id == memoryBinding.connectionId }
                 val memoryConfigured = memoryConnection != null && memoryConnection.supports(AiCapability.MEMORY) && memoryBinding.model.isNotBlank() && (!memoryConnection.bearerAuth || !settings.apiKeys[memoryConnection.id].isNullOrBlank())
-                state.update { it.copy(configured = configured, provider = connection?.let { provider -> "${provider.name} · ${binding.model}" }.orEmpty(), memoryConfigured = memoryConfigured, memoryProvider = memoryConnection?.let { provider -> "${provider.name} · ${memoryBinding.model}" }.orEmpty()) }
+                val toolsAvailable = connection != null && settings.agent.toolChecks[connection.id + ":" + binding.model] == dev.local.record.ai.toolConfigurationFingerprint(connection, binding)
+                state.update { it.copy(configured = configured, provider = connection?.let { provider -> "${provider.name} · ${binding.model}" }.orEmpty(), memoryConfigured = memoryConfigured, memoryProvider = memoryConnection?.let { provider -> "${provider.name} · ${memoryBinding.model}" }.orEmpty(), activeRecallAvailable = toolsAvailable, autoLearning = settings.agent.autoLearning) }
             }
         }
     }

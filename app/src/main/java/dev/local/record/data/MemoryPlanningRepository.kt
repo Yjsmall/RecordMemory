@@ -27,7 +27,8 @@ data class MemoryPlanningInput(
     val connection: AiConnection,
     val binding: CapabilityBinding,
     val sourceZoneId: String? = null,
-    val sourceObservedAt: Long? = null
+    val sourceObservedAt: Long? = null,
+    val automatic: Boolean = false
 )
 
 /** Event-first planning commands. This repository cannot call a provider or schedule work. */
@@ -38,10 +39,11 @@ class MemoryPlanningRepository(private val db: RecordDatabase) {
     suspend fun task(id: String) = dao.get(id)?.domain()
     suspend fun input(task: MemoryPlanningTask): MemoryPlanningInput? = db.processing().content(task.requestContentId)?.body?.let { eventJson.decodeFromString(it) }
 
-    suspend fun request(turnId: String, connection: AiConnection, binding: CapabilityBinding, memories: List<MemoryReference>, now: Long): MemoryPlanningTask = db.withTransaction {
+    suspend fun request(turnId: String, connection: AiConnection, binding: CapabilityBinding, memories: List<MemoryReference>, now: Long, automatic: Boolean = false): MemoryPlanningTask = db.withTransaction {
         require(binding.capability == AiCapability.MEMORY && binding.connectionId == connection.id && binding.model.isNotBlank() && connection.supports(AiCapability.MEMORY)) { "记忆模型配置不兼容" }
         require(memories.size <= 10 && memories.distinctBy { it.id }.size == memories.size) { "记忆引用超限或重复" }
-        val existing = dao.all().map(MemoryPlanningRow::domain).lastOrNull { it.turnId == turnId && it.status in setOf(MemoryPlanningStatus.REQUESTED, MemoryPlanningStatus.RUNNING, MemoryPlanningStatus.COMPLETED) }
+        // Automatic callbacks never retry uncertain or rejected attempts. Manual retries are explicit.
+        val existing = dao.all().map(MemoryPlanningRow::domain).lastOrNull { it.turnId == turnId && (automatic || it.status in setOf(MemoryPlanningStatus.REQUESTED, MemoryPlanningStatus.RUNNING, MemoryPlanningStatus.COMPLETED)) }
         if (existing != null) return@withTransaction existing
         val turn = requireNotNull(db.conversations().turn(turnId)).domain()
         require(turn.status == TurnStatus.ANSWERED && db.conversations().conversation(turn.conversationId)?.deleted == false) { "请先完成对话回复" }
@@ -50,7 +52,7 @@ class MemoryPlanningRepository(private val db: RecordDatabase) {
         val contentId = "$id:input"
         val sourceEvent = db.recordings().events().firstOrNull { it.aggregateId == turnId && it.eventType == "AssistantTurnRequested" }
         val zoneId = sourceEvent?.let { (eventJson.decodeFromString<dev.local.record.domain.TurnEvent>(it.payload) as dev.local.record.domain.TurnEvent.Requested).sourceZoneId }
-        val input = MemoryPlanningInput(turn.userContentId, db.recordings().memoryRevision(), memories, connection, binding, zoneId, db.processing().content(turn.userContentId)?.createdAt)
+        val input = MemoryPlanningInput(turn.userContentId, db.recordings().memoryRevision(), memories, connection, binding, zoneId, db.processing().content(turn.userContentId)?.createdAt, automatic)
         db.processing().saveContent(ContentRow(contentId, "memory-planning-input", eventJson.encodeToString(input), now))
         commit(MemoryPlanningTask(id), MemoryPlanningEvent.Requested(turnId, contentId, now), now)
     }
@@ -101,6 +103,15 @@ class MemoryPlanningRepository(private val db: RecordDatabase) {
     suspend fun cancel(id: String, now: Long) = db.withTransaction {
         val current = task(id) ?: return@withTransaction
         if (current.status in setOf(MemoryPlanningStatus.REQUESTED, MemoryPlanningStatus.RUNNING)) commit(current, MemoryPlanningEvent.Cancelled, now)
+    }
+
+    /** Revoking background authorization leaves manually requested tasks untouched. */
+    suspend fun cancelAutomatic(now: Long) = db.withTransaction {
+        dao.all().map(MemoryPlanningRow::domain).forEach { current ->
+            if (current.status in setOf(MemoryPlanningStatus.REQUESTED, MemoryPlanningStatus.RUNNING) && input(current)?.automatic == true) {
+                commit(current, MemoryPlanningEvent.Cancelled, now)
+            }
+        }
     }
 
     suspend fun recoverInterrupted(now: Long) {

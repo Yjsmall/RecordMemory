@@ -34,6 +34,10 @@ sealed interface TurnEvent {
     data class Started(val attempt: Int, val contextContentId: String) : TurnEvent
 
     @Serializable
+    @SerialName("AgentToolCallCompleted")
+    data class ToolCompleted(val attempt: Int, val callId: String, val contextContentId: String, val receiptContentId: String) : TurnEvent
+
+    @Serializable
     @SerialName("AssistantTurnAnswered")
     data class Answered(val attempt: Int, val replyContentId: String) : TurnEvent
 
@@ -73,6 +77,7 @@ fun evolveTurn(state: AssistantTurn, event: TurnEvent, body: String? = null): As
     val next = when (event) {
         is TurnEvent.Requested -> state.copy(conversationId = event.conversationId, sequence = event.sequence, userContentId = event.userContentId, userText = body.orEmpty())
         is TurnEvent.Started -> state.copy(status = TurnStatus.RUNNING, attempt = event.attempt, contextContentId = event.contextContentId, failure = null)
+        is TurnEvent.ToolCompleted -> state.copy(contextContentId = event.contextContentId)
         is TurnEvent.Answered -> state.copy(status = TurnStatus.ANSWERED, replyContentId = event.replyContentId, reply = body.orEmpty(), failure = null)
         is TurnEvent.Failed -> state.copy(status = TurnStatus.FAILED, failure = event.reason)
         TurnEvent.Cancelled -> state.copy(status = TurnStatus.CANCELLED, failure = null)
@@ -87,6 +92,7 @@ fun validateTurn(state: AssistantTurn, event: TurnEvent) {
         when (event) {
             is TurnEvent.Requested -> state.version == 0 && event.conversationId.isNotBlank() && event.sequence > 0 && event.userContentId.isNotBlank()
             is TurnEvent.Started -> state.status in setOf(TurnStatus.REQUESTED, TurnStatus.FAILED, TurnStatus.CANCELLED) && event.attempt == state.attempt + 1 && event.contextContentId.isNotBlank()
+            is TurnEvent.ToolCompleted -> state.status == TurnStatus.RUNNING && event.attempt == state.attempt && event.callId.isNotBlank() && event.contextContentId.isNotBlank() && event.receiptContentId.isNotBlank()
             is TurnEvent.Answered -> state.status == TurnStatus.RUNNING && event.attempt == state.attempt && event.replyContentId.isNotBlank()
             is TurnEvent.Failed -> state.status in setOf(TurnStatus.REQUESTED, TurnStatus.RUNNING) && event.attempt == state.attempt
             TurnEvent.Cancelled -> state.status in setOf(TurnStatus.REQUESTED, TurnStatus.RUNNING)
@@ -109,5 +115,9 @@ data class AssistantContext(
     val prompt: String,
     val memories: List<MemoryReference>,
     val historyTurnIds: List<String>,
-    val historyMemories: List<MemoryReference> = emptyList()
+    val historyMemories: List<MemoryReference> = emptyList(),
+    val agent: dev.local.record.agent.AgentConfigurationSnapshot? = null,
+    val memoryRevision: Long? = null,
+    val sourceContentIds: List<String> = emptyList(),
+    val toolReceiptIds: List<String> = emptyList()
 )

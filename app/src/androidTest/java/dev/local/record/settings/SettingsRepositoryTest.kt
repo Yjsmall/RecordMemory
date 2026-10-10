@@ -5,18 +5,86 @@ import androidx.test.core.app.ApplicationProvider
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.UUID
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SettingsRepositoryTest {
+    @Test
+    fun disablingWaitsForAuthorizedCommitAndBlocksSubsequentCommit() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val id = UUID.randomUUID().toString()
+        val repository = SettingsRepository(context, "test-$id.bin", "test-$id", scope)
+        try {
+            repository.setAutoLearning(true)
+            val entered = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            val commit = async {
+                repository.withAgentAuthorization({ it.autoLearning }) {
+                    entered.complete(Unit)
+                    release.await()
+                    "committed-before-disable"
+                }
+            }
+            entered.await()
+            val disabling = async { repository.setAutoLearning(false) }
+            yield()
+            assertFalse(disabling.isCompleted)
+            release.complete(Unit)
+            assertEquals("committed-before-disable", commit.await())
+            disabling.await()
+            assertTrue(runCatching { repository.withAgentAuthorization({ it.autoLearning }) { error("Must not commit after disable") } }.exceptionOrNull() is IllegalArgumentException)
+        } finally {
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun assistantPreferencesSurviveConnectionEditsImportAndEncryptedReopen() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val id = UUID.randomUUID().toString()
+        val repository = SettingsRepository(context, "test-$id.bin", "test-$id", scope)
+        try {
+            repository.saveSoul("synthetic-personal-identity")
+            repository.setSkillEnabled("weekly-review", false)
+            repository.setAutoLearning(true)
+            repository.recordToolCheck("a:test-model", "synthetic-fingerprint")
+            val connection = AiConnection("a")
+            repository.saveConnection(connection, "synthetic-key")
+            repository.saveConnection(connection.copy(name = "重命名"), null)
+            repository.merge(AiConfiguration(connections = listOf(AiConnection("b"))))
+            val preferences = repository.settings.first().agent
+            assertEquals("synthetic-personal-identity", preferences.soul)
+            assertEquals(false, preferences.skillStates["weekly-review"])
+            assertTrue(preferences.autoLearning)
+            assertEquals("synthetic-fingerprint", preferences.toolChecks["a:test-model"])
+            val exported = ConfigurationCodec.export(repository.settings.first().configuration)
+            assertFalse(exported.contains("synthetic-personal-identity"))
+            assertFalse(exported.contains("synthetic-fingerprint"))
+            val reopened = EncryptedSettingsSerializer("test-$id").readFrom(java.io.File(context.noBackupFilesDir, "test-$id.bin").inputStream())
+            assertEquals(preferences, reopened.agent)
+            repository.deleteConnection("a")
+            assertEquals(preferences.copy(toolChecks = emptyMap()), repository.settings.first().agent)
+            repository.saveSoul(null)
+            assertEquals(null, repository.settings.first().agent.soul)
+            assertEquals(false, repository.settings.first().agent.skillStates["weekly-review"])
+        } finally {
+            scope.cancel()
+        }
+    }
+
     @Test
     fun doubaoOnlySavesApiKeyAndLegacyMigrationRequiresNewCredential() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Context>()
