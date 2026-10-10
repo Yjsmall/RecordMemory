@@ -51,13 +51,15 @@ class AiRefreshWorker(context: Context, params: WorkerParameters) : CoroutineWor
         graph.awaitRecovery()
         return try {
             graph.processor.drain(System.currentTimeMillis())
-            Result.success()
+            // A foreground drain can leave a retry delay or an active lease in the outbox.
+            // Keep a durable wake-up until that pending work has actually finished.
+            if (graph.processing.hasPendingWork()) Result.retry() else Result.success()
         } catch (_: TransientAiException) {
             Result.retry()
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            Result.success()
+            Result.retry()
         }
     }
 

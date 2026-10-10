@@ -56,6 +56,8 @@ class ProcessingRepository(private val db: RecordDatabase) {
 
     suspend fun releaseLeases() = dao.clearLeases()
 
+    suspend fun hasPendingWork() = dao.pending().isNotEmpty()
+
     suspend fun enqueue(id: String, recordingId: String, capability: String, generation: Int, sourceContentId: String?, now: Long): AiJob = db.withTransaction {
         val job = commitJob(id, AiJobEvent.Requested(recordingId, capability, generation, sourceContentId), "$id:request", now, 0)
         if (job.status == JobStatus.REQUESTED || job.status == JobStatus.RUNNING) dao.saveOutbox(OutboxRow(id, "PENDING"))
@@ -82,6 +84,8 @@ class ProcessingRepository(private val db: RecordDatabase) {
     suspend fun applySuccess(jobId: String, attempt: Int, result: StoredResult, followUps: List<FollowUp>, now: Long) = db.withTransaction {
         val job = requireNotNull(dao.job(jobId)).domain()
         if (events.command("$jobId:complete:$attempt") != null) return@withTransaction
+        // A cancelled job or an expired worker must never publish into a newer attempt.
+        if (job.status != JobStatus.RUNNING || job.attempt != attempt) return@withTransaction
         val recording = events.get(job.recordingId)
         if (recording?.status == "DELETED") {
             commitJob(jobId, AiJobEvent.Cancelled, "$jobId:cancel-deleted", now, 0)
@@ -120,6 +124,8 @@ class ProcessingRepository(private val db: RecordDatabase) {
     }
 
     suspend fun fail(jobId: String, attempt: Int, reason: String, terminal: Boolean, now: Long) = db.withTransaction {
+        val job = dao.job(jobId)?.domain() ?: return@withTransaction
+        if (job.status != JobStatus.RUNNING || job.attempt != attempt) return@withTransaction
         commitJob(jobId, AiJobEvent.AttemptFailed(attempt, reason.take(200), terminal), "$jobId:fail:$attempt", now, if (terminal) 0 else now + 30_000)
         dao.saveOutbox(OutboxRow(jobId, if (terminal) "DONE" else "PENDING"))
     }
@@ -140,7 +146,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         val contentId = UUID.randomUUID().toString()
         dao.saveContent(ContentRow(contentId, "transcript", body, now))
         commitText(recordingId, TextEvent.TranscriptSet(contentId, TextOrigin.USER.name), "$recordingId:transcript:$contentId", now, body)
-        cancelOpen(recordingId, setOf("TITLE", "SUMMARY", "MEMORY"), now)
+        cancelOpen(recordingId, setOf("ASR", "TITLE", "SUMMARY", "MEMORY"), now)
     }
 
     suspend fun reviseTitle(recordingId: String, value: String, now: Long) = savePlain(recordingId, "title", value, now) { contentId ->
@@ -188,7 +194,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         dao.saveContent(ContentRow(contentId, "memory", memoryBody(combined, target.evidence), now))
         commitMemory(targetId, MemoryEvent.Corrected(contentId), "$targetId:merge-from:$sourceId", now, combined, target.evidence)
         commitMemory(sourceId, MemoryEvent.Merged(targetId, memoryFingerprint(source.text)), "$sourceId:merged:$targetId", now, null, null)
-        dao.deleteContent(source.contentId)
+        purgeHistoryContent(source.sourceRecordingId, memoryId = sourceId)
     }
 
     suspend fun onRecordingDeleted(recordingId: String, now: Long) = db.withTransaction {
@@ -203,6 +209,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
             listOfNotNull(current.transcriptContentId, current.titleContentId, current.summaryContentId, current.titleSuggestionContentId, current.summarySuggestionContentId)
                 .forEach { dao.deleteContent(it) }
         }
+        purgeHistoryContent(recordingId)
     }
 
     /** Rebuild projections from events and saved content. Never creates outbox work. */
@@ -273,7 +280,25 @@ class ProcessingRepository(private val db: RecordDatabase) {
     private suspend fun terminalMemory(id: String, now: Long, name: String, event: (String) -> MemoryEvent) = db.withTransaction {
         val current = requireNotNull(memory(id)) { "找不到记忆" }
         commitMemory(id, event(memoryFingerprint(current.text)), "$id:$name", now, null, null)
-        dao.deleteContent(current.contentId)
+        purgeHistoryContent(current.sourceRecordingId, memoryId = id)
+    }
+
+    /** Tombstones retain metadata; all associated historic bodies must also be removed. */
+    private suspend fun purgeHistoryContent(recordingId: String, memoryId: String? = null) {
+        events.events().filter { row ->
+            if (memoryId != null) row.aggregateType == "Memory" && row.aggregateId == memoryId else row.correlationId == recordingId
+        }.forEach { row ->
+            val payload = eventJson.parseToJsonElement(row.payload).jsonObject
+            listOf("contentId", "resultContentId").forEach { field ->
+                payload[field]?.jsonPrimitive?.content?.let { dao.deleteContent(it) }
+            }
+        }
+        if (memoryId != null) {
+            // Older versions also stored a redundant joined copy of memory results in job bodies.
+            dao.jobsFor(recordingId).filter { it.capability == "MEMORY" }.forEach { row ->
+                row.resultContentId?.let { dao.deleteContent(it) }
+            }
+        }
     }
 
     private suspend fun cancelOpen(recordingId: String, capabilities: Set<String>, now: Long) {
@@ -288,7 +313,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
             is StoredResult.Transcript -> result.text
             is StoredResult.Title -> result.text
             is StoredResult.Summary -> result.text
-            is StoredResult.Memories -> result.items.joinToString("\n") { it.text }
+            is StoredResult.Memories -> "${result.items.size} candidates"
         }
         dao.saveContent(ContentRow(id, capability, body, now))
     }

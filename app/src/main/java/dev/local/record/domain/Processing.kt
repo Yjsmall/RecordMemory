@@ -203,7 +203,7 @@ fun summaryEventFor(current: RecordingText, contentId: String): TextEvent = if (
 sealed interface MemoryEvent {
     @Serializable
     @SerialName("MemoryProposed")
-    data class Proposed(val type: String, val contentId: String, val sourceRecordingId: String, val sourceContentId: String) : MemoryEvent
+    data class Proposed(@SerialName("memoryKind") val type: String, val contentId: String, val sourceRecordingId: String, val sourceContentId: String) : MemoryEvent
 
     @Serializable
     @SerialName("MemoryConfirmed")

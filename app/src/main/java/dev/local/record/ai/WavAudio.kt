@@ -42,6 +42,7 @@ internal object WavAudio {
         val bufferInfo = MediaCodec.BufferInfo()
         val samples = ArrayList<Short>(TARGET_RATE * 30)
         var inputDone = false
+        var outputDone = false
         var outputRate = TARGET_RATE
         var channels = 1
         val deadline = System.nanoTime() + 60_000_000_000L
@@ -77,9 +78,13 @@ internal object WavAudio {
                     require(samples.size <= MAX_SAMPLES) { "录音超过 8 分钟，请分段后再转写" }
                 }
                 decoder.releaseOutputBuffer(outputIndex, false)
-                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) break
+                if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                    outputDone = true
+                    break
+                }
             }
         }
+        check(outputDone) { "音频转换超时，请重试" }
         require(samples.isNotEmpty()) { "没有解码出可用音频" }
         return samples.toShortArray()
     }

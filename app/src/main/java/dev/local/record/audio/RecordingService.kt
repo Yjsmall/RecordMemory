@@ -15,6 +15,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import dagger.hilt.android.AndroidEntryPoint
 import dev.local.record.AppGraph
+import dev.local.record.MainActivity
 import dev.local.record.R
 import dev.local.record.domain.RecordingEvent
 import dev.local.record.domain.RecordingStatus
@@ -43,7 +44,7 @@ class RecordingService : Service() {
     private var engine: CaptureEngine? = null
     private var capture: Job? = null
     private var lastRefresh = 0L
-    private var islandOperation = 0
+    private var islandRevision = 0
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -55,6 +56,7 @@ class RecordingService : Service() {
                 setShowBadge(false)
             }
         )
+        AtomicIsland.initialize(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -266,7 +268,25 @@ class RecordingService : Service() {
     }
 
     private fun refresh() {
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION, notification())
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            scope.launch { refresh() }
+            return
+        }
+        if (!graph.session.value.active) return
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(NOTIFICATION, notification())
+        val state = graph.session.value
+        if (AtomicIsland.supportedDevice() && state.phase in setOf(SessionPhase.RECORDING, SessionPhase.PAUSED)) {
+            runCatching {
+                val card = NotificationCompat.Builder(this, CHANNEL)
+                    .setSmallIcon(R.drawable.ic_mic).setContentTitle("随声记")
+                    .setContentText(formatDuration(state.durationMs)).setContentIntent(openPending())
+                    .setOnlyAlertOnce(true).setSilent(true).setOngoing(true)
+                    .addExtras(AtomicIsland.extras(this, formatDuration(state.durationMs), state.phase == SessionPhase.PAUSED, ++islandRevision, openPending()))
+                    .build()
+                manager.notify(AtomicIsland.TAG, AtomicIsland.ID, card)
+            }
+        }
         RecordingWidget.updateAll(this, graph.session.value)
     }
 
@@ -274,12 +294,18 @@ class RecordingService : Service() {
         val state = graph.session.value
         val duration = formatDuration(state.durationMs)
         val onIsland = state.phase == SessionPhase.RECORDING || state.phase == SessionPhase.PAUSED
-        val operation = islandOperation
-        if (onIsland && islandOperation == 0) islandOperation = 1
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_mic)
-            .setContentTitle(if (onIsland) duration else "随声记")
+            .setContentTitle(
+                "随声记 · ${when (state.phase) {
+                    SessionPhase.PAUSED -> "已暂停"
+                    SessionPhase.SAVING -> "正在保存"
+                    SessionPhase.RECORDING -> "正在录音"
+                    else -> "正在准备"
+                }}"
+            )
             .setContentText(duration)
+            .setContentIntent(openPending())
             .setWhen(System.currentTimeMillis() - state.durationMs)
             .setUsesChronometer(onIsland && state.phase == SessionPhase.RECORDING)
             .setOngoing(true)
@@ -287,15 +313,15 @@ class RecordingService : Service() {
             .setSilent(true)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .addAction(0, "停止", commandPending(this, STOP, 21))
-            .addAction(0, "恢复", commandPending(this, RESUME, 22))
-            .addAction(0, "删除", commandPending(this, DISCARD, 23))
-        if (onIsland) builder.addExtras(AtomicIsland.extras(this, duration, state.phase == SessionPhase.PAUSED, operation))
+        if (onIsland) {
+            builder.addAction(0, if (state.phase == SessionPhase.PAUSED) "继续" else "暂停", commandPending(this, if (state.phase == SessionPhase.PAUSED) RESUME else PAUSE, 22))
+                .addAction(0, "停止保存", commandPending(this, STOP, 21))
+        }
         return builder.build()
     }
 
     private fun shutdown() {
-        islandOperation = 0
+        endIsland()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         RecordingWidget.updateAll(this, graph.session.value)
         stopSelf()
@@ -304,6 +330,7 @@ class RecordingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        endIsland()
         engine?.stop()
         scope.cancel()
         wakeLock?.let { if (it.isHeld) it.release() }
@@ -313,6 +340,19 @@ class RecordingService : Service() {
         }
         RecordingWidget.updateAll(this, graph.session.value)
         super.onDestroy()
+    }
+
+    private fun openPending() = PendingIntent.getActivity(this, 24, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+    private fun endIsland() {
+        if (islandRevision == 0) return
+        runCatching {
+            val manager = getSystemService(NotificationManager::class.java)
+            val end = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_mic).setSilent(true).addExtras(AtomicIsland.endExtras()).build()
+            manager.notify(AtomicIsland.TAG, AtomicIsland.ID, end)
+            manager.cancel(AtomicIsland.TAG, AtomicIsland.ID)
+        }
+        islandRevision = 0
     }
 
     companion object {

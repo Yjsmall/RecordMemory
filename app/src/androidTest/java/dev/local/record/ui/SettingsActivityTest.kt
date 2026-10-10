@@ -23,6 +23,11 @@ class SettingsActivityTest {
         compose.onNodeWithTag("add-connection").performScrollTo().performClick()
         compose.onNodeWithTag("connection-name").performTextReplacement("重建后保留的草稿")
         compose.onNodeWithTag("api-key").performScrollTo().performTextReplacement("synthetic-recreation-key")
+        compose.waitForIdle()
+        compose.activityRule.scenario.onActivity { activity ->
+            val model = ViewModelProvider(activity)[SettingsViewModel::class.java]
+            assertEquals("synthetic-recreation-key", model.state.value.connectionDraft?.key)
+        }
         compose.activityRule.scenario.recreate()
         compose.onNodeWithTag("connection-name").performScrollTo().assertTextContains("重建后保留的草稿")
         compose.activityRule.scenario.onActivity { activity ->

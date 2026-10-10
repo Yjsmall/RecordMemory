@@ -20,6 +20,8 @@ import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** Executes claimed outbox jobs. Replay never calls this type. */
 class AiProcessor(
@@ -30,6 +32,7 @@ class AiProcessor(
     private val cacheDirectory: File,
     private val gateway: AiGateway = AiGateway()
 ) {
+    private val execution = Mutex()
     suspend fun enqueueSaved(recordingId: String, now: Long): Boolean {
         val settings = settingsRepository.settings.first()
         if (settings.configuration.processingMode != ProcessingMode.AUTO) return false
@@ -41,29 +44,34 @@ class AiProcessor(
         check(enqueue(recordingId, capability, now, settings, force = true)) { notReady(capability) }
     }
 
-    suspend fun drain(now: Long) {
+    suspend fun drain(now: Long) = execution.withLock {
+        val started = android.os.SystemClock.elapsedRealtime()
+        fun currentTick() = now + android.os.SystemClock.elapsedRealtime() - started
         while (true) {
-            val claim = processing.claim(now, now + 120_000) ?: return
+            val tick = currentTick()
+            // Includes WAV preparation plus the longest HTTP timeout; same-process drains serialize.
+            val claim = processing.claim(tick, tick + 300_000) ?: return@withLock
             try {
                 val prepared = prepare(claim.job.id)
-                processing.applySuccess(claim.job.id, claim.attempt, prepared.result, prepared.followUps, now)
+                processing.applySuccess(claim.job.id, claim.attempt, prepared.result, prepared.followUps, currentTick())
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: TransientAiException) {
-                recordFailure(claim.job.id, claim.attempt, error.message ?: "网络暂时失败", false, now, error)
+                recordFailure(claim.job.id, claim.attempt, error.message ?: "网络暂时失败", false, currentTick(), error)
                 throw error
             } catch (error: IOException) {
                 val transient = TransientAiException(error.message ?: "网络暂时失败", error)
-                recordFailure(claim.job.id, claim.attempt, "网络暂时失败", false, now, transient)
+                recordFailure(claim.job.id, claim.attempt, "网络暂时失败", false, currentTick(), transient)
                 throw transient
             } catch (error: Exception) {
-                recordFailure(claim.job.id, claim.attempt, error.message ?: "处理失败", true, now, error)
+                recordFailure(claim.job.id, claim.attempt, error.message ?: "处理失败", true, currentTick(), error)
             }
         }
     }
 
     private suspend fun enqueue(recordingId: String, capability: AiCapability, now: Long, settings: PrivateSettings, force: Boolean): Boolean {
         val recording = recordings.get(recordingId) ?: return false
+        if (recording.status == dev.local.record.domain.RecordingStatus.DELETED) return false
         if (recording.fileName == null && capability == AiCapability.ASR) return false
         val binding = configured(settings, capability) ?: return false
         val text = processing.text(recordingId)

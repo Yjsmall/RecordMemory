@@ -107,6 +107,7 @@ fun SettingsHome(state: SettingsUiState, model: SettingsViewModel, onConnection:
             SettingsRow(
                 capability.label,
                 when {
+                    capability == AiCapability.ANSWER -> "暂未接入"
                     connection == null -> "未配置"
                     connection.protocol !in supportedProtocols -> "协议待配置"
                     binding.model.isBlank() -> "${connection.name} · 选择模型"
@@ -119,9 +120,9 @@ fun SettingsHome(state: SettingsUiState, model: SettingsViewModel, onConnection:
             if (index < AiCapability.entries.lastIndex) GroupDivider()
         }
     }
-    Text("已配置的转写、标题、总结和记忆会在保存后处理。问答仍未接通。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 4.dp))
+    SectionLabel("处理方式")
     SettingsGroup {
-        ToggleRow("保存后自动处理", "关闭后只在录音详情里手动开始", config.processingMode == dev.local.record.settings.ProcessingMode.AUTO) { model.processingMode(it) }
+        ToggleRow("保存后自动处理", "上传到所选服务，完成转写与整理", config.processingMode == dev.local.record.settings.ProcessingMode.AUTO) { model.processingMode(it) }
     }
     SectionLabel("外观")
     SettingsGroup {
@@ -252,8 +253,8 @@ fun ConnectionEditor(state: SettingsUiState, model: SettingsViewModel, onDeleted
             onClick = { delete = true },
             enabled = !state.busy,
             shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.errorContainer,
-            contentColor = MaterialTheme.colorScheme.onErrorContainer,
+            color = MaterialTheme.colorScheme.surfaceContainerLowest,
+            contentColor = MaterialTheme.colorScheme.error,
             modifier = Modifier.fillMaxWidth().testTag("delete-connection")
         ) {
             Row(Modifier.heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -310,11 +311,7 @@ fun CapabilityEditor(state: SettingsUiState, model: SettingsViewModel) {
     TextButton(onClick = { model.updateBinding { it.copy(prompt = it.capability.defaultPrompt) } }, enabled = !state.busy) { Text("恢复默认提示词") }
     if (binding.capability == AiCapability.ASR) {
         Text(
-            if (connection?.protocol == DOUBAO_ASR) {
-                "保存后可转写。上传前会把 M4A 转为临时 WAV，原始归档仍是 M4A。"
-            } else {
-                "保存后按此模型转写。兼容接口直接上传 M4A。"
-            },
+            "转写将上传音频到所选服务",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

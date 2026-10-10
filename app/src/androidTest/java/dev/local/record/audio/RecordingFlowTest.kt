@@ -1,8 +1,12 @@
 package dev.local.record.audio
 
 import android.Manifest
+import android.app.Notification
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Parcel
 import android.os.SystemClock
 import androidx.lifecycle.ViewModelProvider
 import androidx.room.Room
@@ -12,6 +16,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
 import dagger.hilt.android.EntryPointAccessors
 import dev.local.record.MainActivity
+import dev.local.record.ai.WavAudio
 import dev.local.record.data.RecordDatabase
 import dev.local.record.data.RecordingRepository
 import dev.local.record.domain.RecordingEvent
@@ -19,6 +24,8 @@ import dev.local.record.domain.RecordingStatus
 import dev.local.record.ui.LibraryViewModel
 import dev.local.record.widget.RecordingWidget
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.UUID
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -36,6 +43,9 @@ class RecordingFlowTest {
     fun widgetIntentStartsOnceAndSurvivesActivityRecreationAndBackground() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val graph = EntryPointAccessors.fromApplication(context, RecordingWidget.GraphEntryPoint::class.java).graph()
+        // Launch the actual app-owned widget entry, including its immediate return to the launcher.
+        context.startActivity(Intent(context, RecordToggleActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        waitUntil { graph.session.value.phase == SessionPhase.RECORDING }
         val scenario = ActivityScenario.launch<MainActivity>(Intent(context, MainActivity::class.java).setAction(RecordingService.START))
         try {
             waitUntil { graph.session.value.phase == SessionPhase.RECORDING }
@@ -45,24 +55,58 @@ class RecordingFlowTest {
             scenario.recreate()
             SystemClock.sleep(1_000)
             assertEquals(id, graph.session.value.recordingId)
-            RecordingService.command(context, RecordingService.PAUSE)
+            val notifications = context.getSystemService(NotificationManager::class.java)
+            waitUntil { notifications.activeNotifications.any { it.id == 100 && it.notification.actions?.size == 2 } }
+            val live = notifications.activeNotifications.first { it.id == 100 }.notification
+            assertNotNull(live.contentIntent)
+            assertTrue(live.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
+            assertEquals("暂停", live.actions[0].title.toString())
+            // OEM extras must survive Binder transport and their buttons must control the service.
+            val parcel = Parcel.obtain()
+            val card = try {
+                parcel.writeBundle(AtomicIsland.extras(context, formatDuration(graph.session.value.durationMs), false, 1, live.contentIntent))
+                parcel.setDataPosition(0)
+                requireNotNull(parcel.readBundle(PendingIntent::class.java.classLoader))
+            } finally {
+                parcel.recycle()
+            }
+            assertEquals(0, card.getInt("notification.superx.operation"))
+            assertNotNull(card.getBundle("notification.superx.island")?.getBundle("island.superx.baseInfos"))
+            @Suppress("DEPRECATION")
+            val buttons = requireNotNull(card.getBundle("notification.superx.infos")?.getParcelableArrayList<PendingIntent>("notification.superx.infos.btnClickRespList"))
+            buttons[0].send()
             waitUntil { graph.session.value.phase == SessionPhase.PAUSED }
             SystemClock.sleep(300)
             val pausedAt = graph.session.value.durationMs
             SystemClock.sleep(500)
             assertEquals(pausedAt, graph.session.value.durationMs)
-            RecordingService.command(context, RecordingService.PAUSE)
+            waitUntil { notifications.activeNotifications.firstOrNull { it.id == 100 }?.notification?.actions?.firstOrNull()?.title == "继续" }
+            val paused = notifications.activeNotifications.first { it.id == 100 }.notification
+            assertTrue(!paused.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
+            paused.actions[0].actionIntent.send()
             waitUntil { graph.session.value.phase == SessionPhase.RECORDING }
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
             SystemClock.sleep(1_000)
             assertTrue(graph.session.value.durationMs > pausedAt)
-            // Actual RemoteViews stop action sends the same service PendingIntent.
-            RecordingService.commandPending(context, RecordingService.STOP, 2).send()
+            notifications.activeNotifications.first { it.id == 100 }.notification.actions[1].actionIntent.send()
             waitUntil { !graph.session.value.active }
             val recording = runBlocking { graph.repository.get(id) }
             assertEquals(RecordingStatus.SAVED, recording?.status)
             val file = File(graph.audioDirectory, requireNotNull(recording?.fileName))
             assertNotNull(AudioFile.duration(file))
+            waitUntil { notifications.activeNotifications.none { it.id == 100 || it.tag == AtomicIsland.TAG } }
+            val wav = File(context.cacheDir, "flow-test.wav")
+            try {
+                WavAudio.transcode(file, wav)
+                val bytes = wav.readBytes()
+                val header = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                assertEquals("RIFF", bytes.copyOfRange(0, 4).decodeToString())
+                assertEquals(16_000, header.getInt(24))
+                val wavDuration = header.getInt(40) * 1000L / 32_000
+                assertTrue(kotlin.math.abs(wavDuration - recording.durationMs) < 200)
+            } finally {
+                wav.delete()
+            }
             val before = runBlocking { graph.repository.all() }
             runBlocking { graph.repository.rebuild() }
             assertEquals(before, runBlocking { graph.repository.all() })

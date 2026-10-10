@@ -32,6 +32,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -134,7 +136,7 @@ fun RecordScreen(
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { deleteId = null },
             title = { Text("删除这段录音？") },
-            text = { Text("${recordingTitle(pendingDelete)}\n录音及本机音频将被删除，无法恢复。") },
+            text = { Text("${recordingTitle(pendingDelete)}\n音频、转写、总结和来源记忆将被删除，无法恢复。") },
             confirmButton = {
                 TextButton(onClick = {
                     deleteId = null
@@ -151,7 +153,9 @@ fun RecordScreen(
     val directive = calculatePaneScaffoldDirective(windowInfo)
     val wide = directive.maxHorizontalPartitions > 1
     val strategy = rememberListDetailSceneStrategy<NavKey>(directive = directive)
-    Scaffold(contentWindowInsets = WindowInsets.safeDrawing) { insets ->
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(problem) { problem?.let { snackbar.showSnackbar(it) } }
+    Scaffold(contentWindowInsets = WindowInsets.safeDrawing, snackbarHost = { SnackbarHost(snackbar) }) { insets ->
         NavDisplay(
             backStack = backStack,
             modifier = Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets),
@@ -213,9 +217,14 @@ fun RecordScreen(
                     Column(Modifier.fillMaxSize()) {
                         Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { if (backStack.size > 1) backStack.removeLastOrNull() }) { Icon(RecordIcons.Back, "返回录音库") }
-                            Text("记忆", style = MaterialTheme.typography.titleMedium)
+                            Text("记忆", style = MaterialTheme.typography.titleLarge)
                         }
-                        MemoryLibrary(memories, onConfirmMemory, onForgetMemory, onDisableMemory, onCorrectMemory, onMergeMemory)
+                        MemoryLibrary(memories, onConfirmMemory, onForgetMemory, onDisableMemory, onCorrectMemory, onMergeMemory, onOpenSource = { id ->
+                            if (recordings.any { it.id == id }) {
+                                while (backStack.size > 1) backStack.removeLastOrNull()
+                                backStack.add(Detail(id))
+                            }
+                        })
                     }
                 }
                 entry<SettingsPage> {
@@ -314,7 +323,7 @@ private fun LibraryPane(
             Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("随声记", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f))
                 Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest) {
-                    IconButton(onClick = onMemories, modifier = Modifier.testTag("open-memories")) { Icon(RecordIcons.Spark, "记忆") }
+                    IconButton(onClick = onMemories, modifier = Modifier.testTag("open-memories")) { Icon(RecordIcons.Memory, "记忆") }
                 }
                 onSettings?.let {
                     Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest) {
@@ -334,7 +343,6 @@ private fun LibraryPane(
                 }
             }
         }
-        problem?.let { text -> item { Text(text, color = MaterialTheme.colorScheme.error) } }
         item { SectionLabel("所有录音", "${recordings.size} 条") }
         if (recordings.isEmpty()) {
             item {
@@ -467,9 +475,11 @@ private fun DetailPane(
             val position = if (thisPlayback) playback.positionMs else 0
             var seeking by remember(recording.id) { mutableFloatStateOf(-1f) }
             Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)) {
-                Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    IconBadge(RecordIcons.Wave, Modifier.padding(vertical = 12.dp), size = 88)
-                    Text(formatDuration(recording.durationMs), style = MaterialTheme.typography.displaySmall, fontFamily = FontFamily.Monospace)
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        IconBadge(RecordIcons.Wave)
+                        Text(formatDuration(recording.durationMs), style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace)
+                    }
                     Slider(
                         value = if (seeking >= 0) seeking else position.toFloat().coerceIn(0f, recording.durationMs.toFloat().coerceAtLeast(1f)),
                         onValueChange = { seeking = it },
@@ -493,7 +503,7 @@ private fun DetailPane(
             }
             if (thisPlayback) playback.problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
-        Text("M4A · 本机保存", modifier = Modifier.align(Alignment.CenterHorizontally), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (recording.fileName != null) Text("M4A · 本机保存", modifier = Modifier.align(Alignment.CenterHorizontally), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (recording.fileName != null && !session.active) {
             InsightSection(
                 recording.id, insight, jobs, memories, onTranscribe, onGenerate, onSaveTranscript, onSaveTitle, onSaveSummary,
