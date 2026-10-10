@@ -48,6 +48,10 @@ sealed interface TurnEvent {
     @Serializable
     @SerialName("AssistantTurnDeleted")
     data object Deleted : TurnEvent
+
+    @Serializable
+    @SerialName("AssistantContextWithdrawn")
+    data object ContextWithdrawn : TurnEvent
 }
 
 data class AssistantTurn(
@@ -73,6 +77,7 @@ fun evolveTurn(state: AssistantTurn, event: TurnEvent, body: String? = null): As
         is TurnEvent.Failed -> state.copy(status = TurnStatus.FAILED, failure = event.reason)
         TurnEvent.Cancelled -> state.copy(status = TurnStatus.CANCELLED, failure = null)
         TurnEvent.Deleted -> state.copy(status = TurnStatus.DELETED, userText = "", reply = "", failure = null)
+        TurnEvent.ContextWithdrawn -> state.copy(status = TurnStatus.FAILED, reply = "", contextContentId = null, replyContentId = null, failure = "CONTEXT_WITHDRAWN")
     }
     return next.copy(version = state.version + 1)
 }
@@ -86,6 +91,7 @@ fun validateTurn(state: AssistantTurn, event: TurnEvent) {
             is TurnEvent.Failed -> state.status in setOf(TurnStatus.REQUESTED, TurnStatus.RUNNING) && event.attempt == state.attempt
             TurnEvent.Cancelled -> state.status in setOf(TurnStatus.REQUESTED, TurnStatus.RUNNING)
             TurnEvent.Deleted -> state.version > 0 && state.status != TurnStatus.DELETED
+            TurnEvent.ContextWithdrawn -> state.version > 0 && state.status != TurnStatus.DELETED
         }
     ) { "Invalid assistant turn transition" }
 }

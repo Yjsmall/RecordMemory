@@ -8,8 +8,10 @@ import dev.local.record.data.MemoryDraft
 import dev.local.record.data.MemoryPlanningRepository
 import dev.local.record.data.ProcessingRepository
 import dev.local.record.data.RecordDatabase
+import dev.local.record.domain.AssistantContext
 import dev.local.record.domain.MemoryKind
 import dev.local.record.domain.MemoryPlanningStatus
+import dev.local.record.domain.MemoryReference
 import dev.local.record.domain.MemoryStatus
 import dev.local.record.domain.TurnStatus
 import dev.local.record.settings.AiCapability
@@ -189,6 +191,105 @@ class PersonalAssistantTest {
                     db.close()
                 }
             }
+        }
+    }
+
+    private class Fixture(
+        val server: MockWebServer,
+        val db: RecordDatabase,
+        val conversations: ConversationRepository,
+        val processing: ProcessingRepository,
+        val plans: MemoryPlanningRepository,
+        val assistant: PersonalAssistant,
+        val planner: MemoryPlanner
+    ) {
+        suspend fun answered(id: String) {
+            conversations.create("c-$id", 1)
+            conversations.request(id, "c-$id", "我喜欢简短回答", 2)
+            conversations.start(id, AssistantContext("provider", "合成服务", "answer", RESPONSES, "", emptyList(), emptyList()), 3)
+            conversations.answer(id, 1, "合成回复", emptyList(), 4)
+        }
+    }
+
+    private suspend fun fixture(timeoutMillis: Long = 120_000, block: suspend (Fixture) -> Unit) {
+        server().use { server ->
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val id = UUID.randomUUID().toString()
+            val settings = SettingsRepository(context, "review-test-$id.bin", "review-test-$id", scope)
+            val db = Room.inMemoryDatabaseBuilder(context, RecordDatabase::class.java).build()
+            try {
+                val connection = AiConnection("provider", protocol = RESPONSES, baseUrl = server.url("/v1").toString().trimEnd('/'))
+                settings.saveConnection(connection, "synthetic-key")
+                settings.saveBinding(CapabilityBinding(AiCapability.ANSWER, "provider", "answer"))
+                settings.saveBinding(CapabilityBinding(AiCapability.MEMORY, "provider", "memory"))
+                val conversations = ConversationRepository(db)
+                val processing = ProcessingRepository(db)
+                val plans = MemoryPlanningRepository(db)
+                block(Fixture(server, db, conversations, processing, plans, PersonalAssistant(conversations, processing, settings, scope, gateway()), MemoryPlanner(plans, conversations, processing, settings, scope, gateway(), timeoutMillis)))
+            } finally {
+                scope.coroutineContext[Job]?.cancelAndJoin()
+                db.close()
+            }
+        }
+    }
+
+    @Test fun plannerTimeoutIsFailedAndOnlyExplicitRetryCallsProviderAgain() = runBlocking {
+        fixture(timeoutMillis = 1_000) { f ->
+            f.answered("t")
+            f.server.enqueue(response("""{"schemaVersion":1,"items":[]}""").setBodyDelay(3, TimeUnit.SECONDS))
+            f.planner.request("t")
+            withTimeout(10_000) { while (f.db.memoryPlanning().all().singleOrNull()?.failure != "TIMEOUT") delay(20) }
+            val first = f.db.memoryPlanning().all().single()
+            assertEquals("FAILED", first.status)
+            assertEquals(1, f.server.requestCount)
+            assertTrue(f.processing.memories().isEmpty())
+            f.server.enqueue(response("""{"schemaVersion":1,"items":[]}"""))
+            f.planner.request("t")
+            withTimeout(10_000) { while (f.db.memoryPlanning().all().none { it.status == "COMPLETED" }) delay(20) }
+            assertEquals(2, f.server.requestCount)
+            assertEquals(2, f.db.memoryPlanning().all().size)
+        }
+    }
+
+    @Test fun revokedQueuedPlannerNeverUploadsAfterItsPredecessorStops() = runBlocking {
+        fixture { f ->
+            f.answered("first")
+            f.answered("queued")
+            f.server.enqueue(response("""{"schemaVersion":1,"items":[]}""").setBodyDelay(3, TimeUnit.SECONDS))
+            f.planner.request("first")
+            requireNotNull(f.server.takeRequest(3, TimeUnit.SECONDS))
+            f.planner.request("queued")
+            val queued = f.db.memoryPlanning().all().single { it.turnId == "queued" }
+            assertEquals("REQUESTED", queued.status)
+            f.conversations.delete("c-queued", 5)
+            val first = f.db.memoryPlanning().all().single { it.turnId == "first" }
+            f.planner.cancel(first.id)
+            delay(200)
+            assertEquals(1, f.server.requestCount)
+            assertEquals("CANCELLED", f.plans.task(queued.id)?.status?.name)
+            assertTrue(f.processing.memories().isEmpty())
+        }
+    }
+
+    @Test fun forgettingCancelsInFlightAssistantAndClearsItsContext() = runBlocking {
+        fixture { f ->
+            f.answered("source")
+            f.processing.proposeConversationMemories("source", listOf(MemoryDraft(MemoryKind.PREFERENCE, "喜欢简短回答", "我喜欢简短回答")), 5, explicit = true)
+            val memory = f.processing.memories().single()
+            f.conversations.create("next", 6)
+            f.conversations.request("in-flight", "next", "给我建议", 7)
+            f.server.enqueue(response("根据旧偏好生成的迟到回复").setBodyDelay(1, TimeUnit.SECONDS))
+            f.assistant.respond("in-flight")
+            requireNotNull(f.server.takeRequest(3, TimeUnit.SECONDS))
+            val running = requireNotNull(f.conversations.turn("in-flight"))
+            assertTrue(requireNotNull(running.contextContentId).let { f.conversations.context(it)?.memories?.contains(MemoryReference(memory.id, memory.version)) } == true)
+            f.processing.forgetMemory(memory.id, 8)
+            delay(1_200)
+            assertEquals("CONTEXT_WITHDRAWN", f.conversations.turn("in-flight")?.failure)
+            assertEquals("", f.conversations.turn("in-flight")?.reply)
+            assertTrue(f.db.processing().content(requireNotNull(running.contextContentId)) == null)
+            assertEquals(1, f.server.requestCount)
         }
     }
 }

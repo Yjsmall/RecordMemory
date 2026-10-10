@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -35,9 +36,10 @@ class PersonalAssistant(
     }
 
     private suspend fun execute(turnId: String) {
-        var attempt = conversations.turn(turnId)?.attempt ?: return
+        var attempt = 0
         try {
             val turn = conversations.turn(turnId) ?: return
+            attempt = turn.attempt
             val privateSettings = settings.settings.first()
             val binding = privateSettings.configuration.binding(AiCapability.ANSWER)
             val connection = privateSettings.configuration.connections.firstOrNull { it.id == binding.connectionId }
@@ -61,11 +63,28 @@ class PersonalAssistant(
                 dependencies.addAll(allMemories.filter { it.sourceTurnId == prior.id }.map { MemoryReference(it.id, it.version) })
             }
             val snapshot = AssistantContext(connection.id, connection.name, binding.model, connection.protocol, binding.prompt, memories.map { MemoryReference(it.id, it.version) }, recent.map { it.id }, dependencies.distinct())
-            attempt = conversations.start(turnId, snapshot, System.currentTimeMillis()).attempt
+            attempt = conversations.start(turnId, snapshot, System.currentTimeMillis(), expectedVersion = turn.version).attempt
             val messages = recent.flatMap { listOf(AssistantMessage("user", it.userText), AssistantMessage("assistant", it.reply)) } + AssistantMessage("user", turn.userText)
-            val output = gateway.converse(connection, binding.copy(prompt = assistantInstructions(binding.prompt, memories)), key, messages)
-            val result = parseAssistantReply(output, turn.userText)
-            conversations.answer(turnId, attempt, result.text, emptyList(), System.currentTimeMillis())
+            coroutineScope {
+                val owner = kotlinx.coroutines.currentCoroutineContext()[Job]
+                val watcher = launch {
+                    conversations.turns.collect { turns ->
+                        val current = turns.firstOrNull { it.id == turnId }
+                        if (current == null || current.status == TurnStatus.FAILED && current.failure == "CONTEXT_WITHDRAWN") owner?.cancel()
+                    }
+                }
+                try {
+                    if (!conversations.isCurrent(turnId, attempt)) {
+                        conversations.fail(turnId, attempt, "CONTEXT_CHANGED", System.currentTimeMillis())
+                        return@coroutineScope
+                    }
+                    val output = gateway.converse(connection, binding.copy(prompt = assistantInstructions(binding.prompt, memories)), key, messages)
+                    val result = parseAssistantReply(output, turn.userText)
+                    conversations.answer(turnId, attempt, result.text, emptyList(), System.currentTimeMillis())
+                } finally {
+                    watcher.cancel()
+                }
+            }
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) { conversations.cancel(turnId, System.currentTimeMillis(), attempt) }
             throw cancelled

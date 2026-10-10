@@ -304,13 +304,15 @@ private fun MemoryPlanningActions(task: MemoryPlanningTask?, enabled: Boolean, c
 }
 
 internal fun memoryPlanningLabel(task: MemoryPlanningTask): String = when (task.status) {
-    MemoryPlanningStatus.REQUESTED, MemoryPlanningStatus.RUNNING -> "正在整理记忆"
+    MemoryPlanningStatus.REQUESTED -> "记忆整理已排队"
+    MemoryPlanningStatus.RUNNING -> "正在整理记忆"
     MemoryPlanningStatus.COMPLETED -> if (task.candidateCount == 0) "整理完成，没有新增候选" else "整理完成 · 新增 ${task.candidateCount} 条候选"
     MemoryPlanningStatus.CANCELLED -> "整理已停止，可手动重试"
     MemoryPlanningStatus.FAILED -> when (task.failure) {
         "INTERRUPTED" -> "上次整理中断，可手动重试"
         "SOURCE_CHANGED" -> "来源或记忆已变化，旧整理结果已失效"
         "NETWORK" -> "记忆整理连接失败，可手动重试"
+        "TIMEOUT" -> "记忆整理超时，可手动重试"
         else -> "记忆整理未完成，请检查模型与格式"
     }
 }
@@ -355,6 +357,7 @@ internal fun turnFailureLabel(turn: AssistantTurn): String = when {
     turn.status == TurnStatus.CANCELLED -> "已停止回复"
     turn.failure == "INTERRUPTED" -> "上次回复中断，可手动重试"
     turn.failure == "CONTEXT_CHANGED" -> "记忆已变化，请重试"
+    turn.failure == "CONTEXT_WITHDRAWN" -> "相关记忆或来源已移除，旧回复已清理"
     turn.failure == "NETWORK" -> "连接失败，请稍后重试"
     turn.failure == "CONFIG_OR_FORMAT" -> "请检查对话模型与回复格式"
     else -> "回复未完成，请检查服务后重试"

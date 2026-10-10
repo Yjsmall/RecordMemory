@@ -54,6 +54,7 @@ class AppGraph @Inject constructor(@ApplicationContext context: Context) {
         val messages = RecordingRecovery(repository, audioDirectory).recover(System.currentTimeMillis())
         processing.releaseLeases()
         conversations.recoverInterrupted(System.currentTimeMillis())
+        conversations.purgeWithdrawnMemoryContent(System.currentTimeMillis())
         memoryPlanning.recoverInterrupted(System.currentTimeMillis())
         scheduler.kick()
         messages

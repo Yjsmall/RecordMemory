@@ -8,6 +8,7 @@ import dev.local.record.domain.MemoryReference
 import dev.local.record.domain.MemoryStatus
 import dev.local.record.domain.TurnStatus
 import dev.local.record.domain.evolveMemoryPlanning
+import dev.local.record.settings.AiCapability
 import dev.local.record.settings.AiConnection
 import dev.local.record.settings.CapabilityBinding
 import java.util.UUID
@@ -35,6 +36,8 @@ class MemoryPlanningRepository(private val db: RecordDatabase) {
     suspend fun input(task: MemoryPlanningTask): MemoryPlanningInput? = db.processing().content(task.requestContentId)?.body?.let { eventJson.decodeFromString(it) }
 
     suspend fun request(turnId: String, connection: AiConnection, binding: CapabilityBinding, memories: List<MemoryReference>, now: Long): MemoryPlanningTask = db.withTransaction {
+        require(binding.capability == AiCapability.MEMORY && binding.connectionId == connection.id && binding.model.isNotBlank() && connection.supports(AiCapability.MEMORY)) { "记忆模型配置不兼容" }
+        require(memories.size <= 10 && memories.distinctBy { it.id }.size == memories.size) { "记忆引用超限或重复" }
         val existing = dao.all().map(MemoryPlanningRow::domain).lastOrNull { it.turnId == turnId && it.status in setOf(MemoryPlanningStatus.REQUESTED, MemoryPlanningStatus.RUNNING, MemoryPlanningStatus.COMPLETED) }
         if (existing != null) return@withTransaction existing
         val turn = requireNotNull(db.conversations().turn(turnId)).domain()
@@ -75,7 +78,7 @@ class MemoryPlanningRepository(private val db: RecordDatabase) {
             return@withTransaction false
         }
         val turn = requireNotNull(db.conversations().turn(current.turnId)).domain()
-        require(items.size <= 3 && items.all { it.text.isNotBlank() && it.text.length <= 500 && it.evidence.isNotBlank() && turn.userText.contains(it.evidence) }) { "记忆证据不匹配" }
+        require(items.size <= 3 && items.all { it.text.isNotBlank() && it.text.length <= 500 && it.evidence.isNotBlank() && it.evidence.length <= 200 && turn.userText.contains(it.evidence) }) { "记忆证据不匹配" }
         val processing = ProcessingRepository(db)
         val before = processing.memories().count { it.sourceTurnId == current.turnId }
         processing.proposeConversationMemories(current.turnId, items, now)

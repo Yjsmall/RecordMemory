@@ -18,11 +18,11 @@ fun personalMemoryProfile(memories: List<MemoryItem>): PersonalMemoryProfile {
 fun selectPersonalMemoryContext(memories: List<MemoryItem>, question: String, maxCharacters: Int = 6_000, maxItems: Int = 24): List<MemoryItem> {
     require(maxCharacters >= 0 && maxItems >= 0)
     val profile = personalMemoryProfile(memories)
-    val tokens = question.lowercase().split(Regex("\\s+|[，。！？、,.!?：:；;]"))
-        .flatMap { word -> if (word.length > 3) word.windowed(2) else listOf(word) }.filter { it.length >= 2 }.distinct()
+    val tokens = memoryTokens(question)
     val overview = listOf("了解我", "关于我", "对我有哪些了解", "我的记忆", "记得我").any(question::contains)
     val matches = profile.items.map { memory ->
-        val score = tokens.count { memory.text.lowercase().contains(it) } + if (question.contains(memory.type.label)) 2 else 0
+        val searchable = memoryTokens(memory.text).toSet()
+        val score = tokens.count { it in searchable } + if (question.contains(memory.type.label)) 2 else 0
         memory to score
     }.filter { it.second > 0 || overview }.sortedWith(compareByDescending<Pair<MemoryItem, Int>> { it.second }.thenBy { it.first.id }).map { it.first }
     val smallProfile = profile.preferences.take(8)
@@ -32,3 +32,13 @@ fun selectPersonalMemoryContext(memories: List<MemoryItem>, question: String, ma
         (size <= remaining).also { accepted -> if (accepted) remaining -= size }
     }.take(maxItems)
 }
+
+/** Keep English words whole; only contiguous Han text produces overlapping bigrams. */
+private fun memoryTokens(text: String): List<String> = Regex("[\\p{IsHan}]+|[a-z0-9_]+").findAll(text.lowercase()).flatMap { match ->
+    val word = match.value
+    if (word.first().code > 127) {
+        if (word.length >= 2) word.windowed(2).asSequence() else sequenceOf(word)
+    } else {
+        sequenceOf(word)
+    }
+}.filter { it.length >= 2 }.distinct().toList()

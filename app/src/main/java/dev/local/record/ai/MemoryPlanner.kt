@@ -14,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -23,8 +24,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 @Serializable
 private data class MemoryPlanDocument(val schemaVersion: Int, val items: List<MemoryPlanItem>)
@@ -35,7 +38,13 @@ private data class MemoryPlanItem(val action: String, val type: String = "", val
 /** Strict first-stage plan: ADD creates a candidate, IGNORE writes no knowledge. */
 fun parseMemoryPlan(source: String, userText: String): List<MemoryDraft> {
     require(source.length <= 12_000) { "记忆计划过长" }
-    val document = Json.decodeFromString<MemoryPlanDocument>(extractJsonObject(source))
+    val trimmed = source.trim()
+    val body = if (trimmed.startsWith("```")) {
+        Regex("```(?:json)?\\s*(\\{.*\\})\\s*```", RegexOption.DOT_MATCHES_ALL).matchEntire(trimmed)?.groupValues?.get(1) ?: throw IllegalArgumentException("记忆计划格式不兼容")
+    } else {
+        trimmed
+    }
+    val document = Json.decodeFromString<MemoryPlanDocument>(body)
     require(document.schemaVersion == 1 && document.items.size <= 3) { "记忆计划格式不兼容" }
     return document.items.mapNotNull { item ->
         require(item.action in setOf("ADD", "IGNORE")) { "不支持的记忆操作" }
@@ -55,10 +64,15 @@ class MemoryPlanner(
     private val processing: ProcessingRepository,
     private val settings: SettingsRepository,
     private val scope: CoroutineScope,
-    private val gateway: AiGateway = AiGateway()
+    private val gateway: AiGateway = AiGateway(),
+    private val timeoutMillis: Long = 120_000
 ) {
     private val active = java.util.concurrent.ConcurrentHashMap<String, Job>()
     private val execution = Mutex()
+
+    init {
+        require(timeoutMillis > 0)
+    }
 
     suspend fun request(turnId: String) {
         val configuration = settings.settings.first()
@@ -77,17 +91,17 @@ class MemoryPlanner(
 
     private suspend fun execute(id: String) {
         try {
-            execution.withLock {
-                withTimeout(120_000) {
-                    val input = plans.start(id, System.currentTimeMillis()) ?: return@withTimeout
-                    coroutineScope {
-                        val owner = kotlinx.coroutines.currentCoroutineContext()[Job]
-                        val watcher = launch {
-                            plans.tasks.collect { tasks ->
-                                if (tasks.firstOrNull { it.id == id }?.status in setOf(MemoryPlanningStatus.FAILED, MemoryPlanningStatus.CANCELLED)) owner?.cancel()
-                            }
+            withTimeout(timeoutMillis) {
+                coroutineScope {
+                    val owner = kotlinx.coroutines.currentCoroutineContext()[Job]
+                    val watcher = launch {
+                        plans.tasks.collect { tasks ->
+                            if (tasks.firstOrNull { it.id == id }?.status in setOf(MemoryPlanningStatus.FAILED, MemoryPlanningStatus.CANCELLED)) owner?.cancel()
                         }
-                        try {
+                    }
+                    try {
+                        execution.withLock {
+                            val input = plans.start(id, System.currentTimeMillis()) ?: return@withLock
                             val configuration = settings.settings.first()
                             require(configuration.configuration.connections.any { it == input.connection }) { "记忆模型连接已变化" }
                             val key = configuration.apiKeys[input.connection.id]
@@ -98,22 +112,34 @@ class MemoryPlanner(
                             val data = buildJsonObject {
                                 put("sourceId", input.sourceContentId)
                                 put("sourceText", turn.userText)
-                                put("existingConfirmedMemories", Json.encodeToString(memories.map { it.text }))
+                                putJsonArray("existingConfirmedMemories") {
+                                    memories.forEach { memory ->
+                                        addJsonObject {
+                                            put("id", memory.id)
+                                            put("version", memory.version)
+                                            put("type", memory.type.name)
+                                            put("text", memory.text)
+                                        }
+                                    }
+                                }
                             }.toString()
                             val prompt = input.binding.prompt + "\n" + MEMORY_PLAN_RULES
                             // Last check before sending source data; commit validates the same snapshot again.
                             if (!plans.isCurrent(id)) {
                                 plans.fail(id, "SOURCE_CHANGED", System.currentTimeMillis())
-                                return@coroutineScope
+                                return@withLock
                             }
                             val output = gateway.converse(input.connection, input.binding.copy(prompt = prompt), key, listOf(AssistantMessage("user", data)))
                             plans.complete(id, parseMemoryPlan(output, turn.userText), System.currentTimeMillis())
-                        } finally {
-                            watcher.cancel()
                         }
+                    } finally {
+                        watcher.cancel()
                     }
                 }
             }
+        } catch (timeout: TimeoutCancellationException) {
+            withContext(NonCancellable) { plans.fail(id, "TIMEOUT", System.currentTimeMillis()) }
+            throw timeout
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) { plans.cancel(id, System.currentTimeMillis()) }
             throw cancelled

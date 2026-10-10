@@ -15,8 +15,8 @@ android {
         applicationId = "dev.local.record"
         minSdk = 29
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.4.1"
+        versionCode = 9
+        versionName = "0.4.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildFeatures { compose = true }

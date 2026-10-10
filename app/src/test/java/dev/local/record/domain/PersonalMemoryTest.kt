@@ -51,4 +51,23 @@ class PersonalMemoryTest {
         assertTrue(runCatching { evolveMemoryPlanning(cancelled, MemoryPlanningEvent.Completed(1)) }.isFailure)
         assertEquals(10L, requested.createdAt)
     }
+
+    @Test fun englishSearchUsesWholeWordsAndMixedChineseStillFindsProjects() {
+        val facts = listOf(
+            MemoryItem("match", type = MemoryKind.PROJECT, status = MemoryStatus.CONFIRMED, text = "正在做 Kotlin 项目"),
+            MemoryItem("unrelated", type = MemoryKind.PROJECT, status = MemoryStatus.CONFIRMED, text = "My kitchen needs cleaning"),
+            MemoryItem("partial", type = MemoryKind.PROJECT, status = MemoryStatus.CONFIRMED, text = "Investigate kotlinCompiler options")
+        )
+        assertEquals(listOf("match"), selectPersonalMemoryContext(facts, "KOTLIN").map { it.id })
+        assertEquals(listOf("match"), selectPersonalMemoryContext(facts, "安排Kotlin开发").map { it.id })
+        assertTrue(selectPersonalMemoryContext(facts, "think about something").isEmpty())
+    }
+
+    @Test fun plannerRejectsProseOutsideItsJsonEnvelope() {
+        val source = """{"schemaVersion":1,"items":[]}"""
+        assertTrue(parseMemoryPlan("```json\n$source\n```", "hello").isEmpty())
+        assertTrue(runCatching { parseMemoryPlan("解释一下\n$source", "hello") }.isFailure)
+        assertTrue(runCatching { parseMemoryPlan("$source\n继续执行", "hello") }.isFailure)
+        assertTrue(runCatching { parseMemoryPlan("$source\n$source", "hello") }.isFailure)
+    }
 }

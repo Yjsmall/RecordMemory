@@ -4,7 +4,7 @@
 
 支持桌面小组件自动开始、麦克风前台服务、暂停／继续、M4A 保存、按日期分组的录音库、播放和进度拖动。按实际窗口与折叠特征展示单栏／列表详情双栏；Activity 重建不会结束服务录音。
 
-0.4.1 开始独立记忆系统：私人助手回复后可主动「整理记忆」，使用「记忆提取」单独绑定的模型提出有原文依据的候选，确认后才进入后续聊天。对话操作菜单提供已确认记忆概览；本机中文匹配只装入相关事实与少量偏好。聊天本身不再顺带提取记忆，未配置记忆模型仍可聊天和手动「记住…」。支持 Responses 与 Chat Completions。详见 [记忆系统第一版](docs/memory-system-delivery.md)；既有聊天使用见 [私人助手交付](docs/personal-assistant-delivery.md)。
+0.4.2 加固独立记忆系统：私人助手回复后可主动「整理记忆」，使用「记忆提取」单独绑定的模型提出有原文依据的候选，确认后才进入后续聊天。忘记／删除会清理依赖该内容的历史回复和请求快照，并取消在途回复；整理有独立的排队与超时提示。对话操作菜单提供已确认记忆概览；本机中文二元字与英文完整词匹配只装入相关事实与少量偏好。聊天本身不再顺带提取记忆，未配置记忆模型仍可聊天和手动「记住…」。支持 Responses 与 Chat Completions。详见 [记忆系统第一版](docs/memory-system-delivery.md) 和 [复审与加固](docs/memory-system-review.md)；既有聊天使用见 [私人助手交付](docs/personal-assistant-delivery.md)。
 
 SOUL.md 身份、应用内置且可启用／禁用的 skills、工具调用主动回忆与完整结构化记忆方案见 [私人助手架构](docs/architecture/personal-agent.md) 和 [内置资源模板](docs/examples/agent-workspace/README.md)。独立候选整理已开始落地，其余能力仍为设计。
 

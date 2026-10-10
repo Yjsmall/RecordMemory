@@ -84,6 +84,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         memories().filter { it.sourceConversationId == conversationId && it.visible }.forEach { memory ->
             commitMemory(memory.id, MemoryEvent.Invalidated(memoryFingerprint(memory.text)), "${memory.id}:conversation-deleted", now, null, null)
             purgeHistoryContent("", memory.id)
+            ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(memory.id), now = now)
         }
         MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
@@ -183,6 +184,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         dao.memoriesFor(recordingId).map(MemoryRow::domain).filter { it.visible && it.sourceContentId != contentId }.forEach { item ->
             commitMemory(item.id, MemoryEvent.Invalidated(memoryFingerprint(item.text)), "${item.id}:transcript-revised:$contentId", now, null, null)
             purgeHistoryContent(recordingId, item.id)
+            ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(item.id), now = now)
         }
         MemoryPlanningRepository(db).invalidateSnapshots(now)
         cancelOpen(recordingId, setOf("ASR", "TITLE", "SUMMARY", "MEMORY"), now)
@@ -239,6 +241,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         commitMemory(targetId, MemoryEvent.Corrected(contentId), "$targetId:merge-from:$sourceId", now, combined, target.evidence)
         commitMemory(sourceId, MemoryEvent.Merged(targetId, memoryFingerprint(source.text)), "$sourceId:merged:$targetId", now, null, null)
         purgeHistoryContent(source.sourceRecordingId, memoryId = sourceId)
+        ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(sourceId), now = now)
         MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 
@@ -248,6 +251,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         dao.memoriesFor(recordingId).map(MemoryRow::domain).filter { it.visible }.forEach { item ->
             commitMemory(item.id, MemoryEvent.Invalidated(memoryFingerprint(item.text)), "${item.id}:source-deleted", now, null, null)
             dao.deleteContent(item.contentId)
+            ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(item.id), now = now)
         }
         val current = dao.text(recordingId)?.domain()
         if (current != null) {
@@ -325,8 +329,10 @@ class ProcessingRepository(private val db: RecordDatabase) {
 
     private suspend fun terminalMemory(id: String, now: Long, name: String, event: (String) -> MemoryEvent) = db.withTransaction {
         val current = requireNotNull(memory(id)) { "找不到记忆" }
+        if (!current.visible) return@withTransaction
         commitMemory(id, event(memoryFingerprint(current.text)), "$id:$name", now, null, null)
         purgeHistoryContent(current.sourceRecordingId, memoryId = id)
+        ConversationRepository(db).withdrawDerivedContent(memoryIds = setOf(id), now = now)
         MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 

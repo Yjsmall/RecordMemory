@@ -54,26 +54,36 @@ class ConversationRepository(private val db: RecordDatabase) {
         }
     }
 
-    suspend fun start(id: String, snapshot: AssistantContext, now: Long): AssistantTurn = db.withTransaction {
+    suspend fun start(id: String, snapshot: AssistantContext, now: Long, expectedVersion: Int? = null): AssistantTurn = db.withTransaction {
         val state = requireNotNull(turn(id))
+        require(expectedVersion == null || state.version == expectedVersion) { "请求已变化" }
         require(dao.conversation(state.conversationId)?.deleted == false) { "对话已删除" }
         require(turns(state.conversationId).none { it.id != id && it.status in setOf(TurnStatus.REQUESTED, TurnStatus.RUNNING) }) { "已有回复在进行中" }
+        require(snapshotIsValid(snapshot)) { "请求上下文已变化" }
         val contentId = "$id:context:${state.attempt + 1}"
         content.saveContent(ContentRow(contentId, "chat-context", eventJson.encodeToString(snapshot), now))
         commitTurn(id, TurnEvent.Started(state.attempt + 1, contentId), now)
     }
 
+    suspend fun isCurrent(id: String, attempt: Int): Boolean = db.withTransaction {
+        val state = turn(id) ?: return@withTransaction false
+        val snapshot = state.contextContentId?.let { context(it) } ?: return@withTransaction false
+        state.status == TurnStatus.RUNNING && state.attempt == attempt && dao.conversation(state.conversationId)?.deleted == false && snapshotIsValid(snapshot)
+    }
+
+    private suspend fun snapshotIsValid(snapshot: AssistantContext): Boolean = snapshot.memories.all { reference ->
+        val memory = content.memory(reference.id)?.domain()
+        memory?.version == reference.version && memory.status == dev.local.record.domain.MemoryStatus.CONFIRMED
+    } && snapshot.historyMemories.all { reference ->
+        val memory = content.memory(reference.id)?.domain()
+        memory?.version == reference.version && memory.visible
+    } && snapshot.historyTurnIds.all { turn(it)?.status == TurnStatus.ANSWERED }
+
     suspend fun answer(id: String, attempt: Int, reply: String, memories: List<MemoryDraft>, now: Long): Boolean = db.withTransaction {
         val state = turn(id) ?: return@withTransaction false
         if (state.status != TurnStatus.RUNNING || state.attempt != attempt || dao.conversation(state.conversationId)?.deleted != false) return@withTransaction false
         val snapshot = state.contextContentId?.let { context(it) } ?: error("缺少请求上下文")
-        val valid = snapshot.memories.all { reference ->
-            val memory = content.memory(reference.id)?.domain()
-            memory?.version == reference.version && memory.status == dev.local.record.domain.MemoryStatus.CONFIRMED
-        } && snapshot.historyMemories.all { reference ->
-            val memory = content.memory(reference.id)?.domain()
-            memory?.version == reference.version && memory.visible
-        } && snapshot.historyTurnIds.all { turn(it)?.status == TurnStatus.ANSWERED }
+        val valid = snapshotIsValid(snapshot)
         if (!valid) {
             commitTurn(id, TurnEvent.Failed(attempt, "CONTEXT_CHANGED"), now)
             return@withTransaction false
@@ -107,12 +117,50 @@ class ConversationRepository(private val db: RecordDatabase) {
         if (conversation.deleted) return@withTransaction
         commitConversation(id, ConversationEvent.Deleted, now)
         turns(id).filter { it.status != TurnStatus.DELETED }.forEach { commitTurn(it.id, TurnEvent.Deleted, now) }
+        withdrawDerivedContent(deletedTurnIds = turns(id).map { it.id }.toSet(), now = now)
         ProcessingRepository(db).onConversationDeleted(id, now)
         // Historic failed attempts and custom prompts are also deletable content.
         events.events().filter { it.aggregateType == "AssistantTurn" && it.correlationId == id }.forEach { row ->
             val payload = eventJson.parseToJsonElement(row.payload).jsonObject
             listOf("userContentId", "contextContentId", "replyContentId").forEach { key -> payload[key]?.jsonPrimitive?.content?.let { content.deleteContent(it) } }
         }
+    }
+
+    /** Removes every historic derived reply/context, retaining user messages under their own scope. */
+    suspend fun withdrawDerivedContent(memoryIds: Set<String> = emptySet(), deletedTurnIds: Set<String> = emptySet(), now: Long) = db.withTransaction {
+        val affected = deletedTurnIds.toMutableSet()
+        affected.addAll(content.memories().filter { it.id in memoryIds }.map { it.sourceTurnId }.filter { it.isNotBlank() })
+        val history = events.events().filter { it.aggregateType == "AssistantTurn" }
+        val snapshots = history.mapNotNull { row ->
+            val id = eventJson.parseToJsonElement(row.payload).jsonObject["contextContentId"]?.jsonPrimitive?.content
+            id?.let { context(it) }?.let { row.aggregateId to it }
+        }
+        do {
+            val before = affected.size
+            snapshots.forEach { (turnId, snapshot) ->
+                if ((snapshot.memories + snapshot.historyMemories).any { it.id in memoryIds } || snapshot.historyTurnIds.any { it in affected }) affected.add(turnId)
+            }
+        } while (affected.size != before)
+        affected.forEach { id ->
+            val state = turn(id)
+            if (state != null && state.status != TurnStatus.DELETED) commitTurn(id, TurnEvent.ContextWithdrawn, now)
+        }
+        history.filter { it.aggregateId in affected }.forEach { row ->
+            val payload = eventJson.parseToJsonElement(row.payload).jsonObject
+            listOf("contextContentId", "replyContentId").forEach { key -> payload[key]?.jsonPrimitive?.content?.let { content.deleteContent(it) } }
+        }
+    }
+
+    /** Upgrade recovery also removes copies left by older versions; it never calls a provider. */
+    suspend fun purgeWithdrawnMemoryContent(now: Long) = db.withTransaction {
+        val memories = content.memories().filter { it.status in setOf("FORGOTTEN", "INVALIDATED", "MERGED") }
+        val history = events.events()
+        val pending = memories.filter { memory ->
+            val revokedAt = history.lastOrNull { it.aggregateType == "Memory" && it.aggregateId == memory.id }?.globalPosition ?: 0
+            val cleanedAt = history.lastOrNull { it.aggregateType == "AssistantTurn" && it.aggregateId == memory.sourceTurnId && it.eventType == "AssistantContextWithdrawn" }?.globalPosition ?: 0
+            memory.sourceTurnId.isBlank() || cleanedAt <= revokedAt
+        }
+        if (pending.isNotEmpty()) withdrawDerivedContent(memoryIds = pending.map { it.id }.toSet(), now = now)
     }
 
     suspend fun replay() = db.withTransaction {
