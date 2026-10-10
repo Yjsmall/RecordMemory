@@ -36,4 +36,29 @@ class ConversationMigrationTest {
         helper.createDatabase(name, 1).close()
         helper.runMigrationsAndValidate(name, 3, true, MIGRATION_1_2, MIGRATION_2_3).close()
     }
+
+    @Test fun memoryPlannerUpgradePreservesForgottenTombstonesAndConversations() {
+        val name = "memory-planner-migration-3-4"
+        InstrumentationRegistry.getInstrumentation().targetContext.deleteDatabase(name)
+        helper.createDatabase(name, 3).use { db ->
+            db.execSQL("INSERT INTO memories VALUES ('forgotten', 3, 'PREFERENCE', 'FORGOTTEN', '', '', 'deleted-body', '', 'source', 'tombstone', 'c', 't')")
+            db.execSQL("INSERT INTO conversations VALUES ('c', 1, 100, 0)")
+        }
+        helper.runMigrationsAndValidate(name, 4, true, MIGRATION_3_4).use { db ->
+            db.query("SELECT status, fingerprint, sourceTurnId FROM memories WHERE id = 'forgotten'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("FORGOTTEN", cursor.getString(0))
+                assertEquals("tombstone", cursor.getString(1))
+                assertEquals("t", cursor.getString(2))
+            }
+            db.query("SELECT COUNT(*) FROM memory_planning").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(0, cursor.getInt(0))
+            }
+            db.query("SELECT COUNT(*) FROM conversations").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals(1, cursor.getInt(0))
+            }
+        }
+    }
 }

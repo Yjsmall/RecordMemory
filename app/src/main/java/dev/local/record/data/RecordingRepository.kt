@@ -62,7 +62,7 @@ class RecordingRepository(private val db: RecordDatabase) {
         history.forEach { row ->
             require(row.schemaVersion == 1) { "Unsupported event schema" }
             if (row.aggregateType != "Recording") {
-                require(row.aggregateType in setOf("AiJob", "Memory", "RecordingText", "Conversation", "AssistantTurn")) { "Unsupported event schema" }
+                require(row.aggregateType in setOf("AiJob", "Memory", "RecordingText", "Conversation", "AssistantTurn", "MemoryPlanning")) { "Unsupported event schema" }
                 return@forEach
             }
             val state = states[row.aggregateId] ?: Recording(row.aggregateId)
@@ -76,5 +76,6 @@ class RecordingRepository(private val db: RecordDatabase) {
         dao.checkpoint(ProjectionCheckpoint(position = history.lastOrNull()?.globalPosition ?: 0))
         ProcessingRepository(db).replay()
         ConversationRepository(db).replay()
+        MemoryPlanningRepository(db).replay()
     }
 }

@@ -54,8 +54,11 @@ import dev.local.record.audio.SessionState
 import dev.local.record.audio.formatDuration
 import dev.local.record.domain.AssistantTurn
 import dev.local.record.domain.MemoryKind
+import dev.local.record.domain.MemoryPlanningStatus
+import dev.local.record.domain.MemoryPlanningTask
 import dev.local.record.domain.MemoryStatus
 import dev.local.record.domain.TurnStatus
+import dev.local.record.domain.personalMemoryProfile
 
 /** Parent owns safeDrawing (including IME); the composer stays outside the scrolling messages. */
 @Composable
@@ -76,12 +79,17 @@ internal fun AssistantScreen(
     onMemories: () -> Unit,
     onConfigure: () -> Unit,
     onPause: () -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onPlanMemory: (String) -> Unit = {},
+    onCancelMemoryPlanning: (String) -> Unit = {},
+    onConfigureMemory: () -> Unit = {}
 ) {
     var menu by remember { mutableStateOf(false) }
     var history by rememberSaveable { mutableStateOf(false) }
     var deleting by rememberSaveable { mutableStateOf(false) }
     var remembering by remember { mutableStateOf<AssistantTurn?>(null) }
+    var planning by remember { mutableStateOf<String?>(null) }
+    var profile by rememberSaveable { mutableStateOf(false) }
     val list = rememberLazyListState()
     val turns = state.turns
     LaunchedEffect(state.conversationId, turns.size, turns.lastOrNull()?.status) {
@@ -111,6 +119,14 @@ internal fun AssistantScreen(
                         DropdownMenuItem(text = { Text("对话模型") }, onClick = {
                             menu = false
                             onConfigure()
+                        })
+                        DropdownMenuItem(text = { Text("已确认记忆概览") }, onClick = {
+                            menu = false
+                            profile = true
+                        })
+                        DropdownMenuItem(text = { Text("记忆模型") }, onClick = {
+                            menu = false
+                            onConfigureMemory()
                         })
                         DropdownMenuItem(text = { Text("删除当前对话") }, enabled = state.conversationId != null && !state.busy, onClick = {
                             menu = false
@@ -158,11 +174,14 @@ internal fun AssistantScreen(
                             }
                             TurnStatus.ANSWERED -> {
                                 AssistantAnswer(turn.reply)
+                                val task = state.memoryTasks.filter { it.turnId == turn.id }.maxByOrNull { it.createdAt }
+                                MemoryPlanningActions(task, state.ready && !state.busy, state.memoryConfigured, { planning = turn.id }, { task?.id?.let(onCancelMemoryPlanning) }, onConfigureMemory, turn.id)
                                 state.memories.filter { it.sourceTurnId == turn.id && it.visible }.forEach { memory ->
                                     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth()) {
                                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text(if (memory.status == MemoryStatus.CONFIRMED) "已记住 · ${memory.type.label}" else "可以记住 · ${memory.type.label}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                            Text(if (memory.status == MemoryStatus.CONFIRMED) "已记住 · ${memory.type.label}" else "待确认 · ${memory.type.label}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                                             Text(memory.text, style = MaterialTheme.typography.bodyMedium)
+                                            if (memory.evidence.isNotBlank()) Text("依据：${memory.evidence}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                             if (memory.status == MemoryStatus.CANDIDATE) {
                                                 Row(Modifier.align(Alignment.End)) {
                                                     TextButton(onClick = { onForget(memory.id) }) { Text("忽略") }
@@ -211,6 +230,35 @@ internal fun AssistantScreen(
             remembering = null
         }
     }
+    planning?.let { turnId ->
+        AlertDialog(onDismissRequest = { planning = null }, title = { Text("整理这条消息的记忆？") }, text = {
+            Text("将此条用户消息及至多 10 条相关已确认记忆发送至 ${state.memoryProvider}，可能产生调用费用。新候选需要你确认后才会用于后续对话。")
+        }, confirmButton = {
+            TextButton(onClick = {
+                planning = null
+                onPlanMemory(turnId)
+            }, enabled = state.memoryConfigured && !state.busy) { Text("开始整理") }
+        }, dismissButton = { TextButton(onClick = { planning = null }) { Text("取消") } })
+    }
+    if (profile) {
+        val current = personalMemoryProfile(state.memories)
+        AlertDialog(onDismissRequest = { profile = false }, title = { Text("已确认记忆概览") }, text = {
+            Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (current.items.isEmpty()) Text("还没有已确认记忆。可以从消息中手动记住，或整理后确认候选。")
+                listOf("偏好与约定" to current.preferences, "项目与待办" to current.projects, "其他事实" to current.otherFacts).forEach { (title, items) ->
+                    if (items.isNotEmpty()) {
+                        Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                        items.forEach { memory -> Text(memory.text, style = MaterialTheme.typography.bodyMedium) }
+                    }
+                }
+            }
+        }, confirmButton = {
+            TextButton(onClick = {
+                profile = false
+                onMemories()
+            }) { Text("管理记忆") }
+        }, dismissButton = { TextButton(onClick = { profile = false }) { Text("关闭") } })
+    }
     if (deleting) {
         AlertDialog(
             onDismissRequest = { deleting = false },
@@ -238,6 +286,32 @@ internal fun AssistantScreen(
                 }
             }
         }, confirmButton = { TextButton(onClick = { history = false }) { Text("关闭") } })
+    }
+}
+
+@Composable
+private fun MemoryPlanningActions(task: MemoryPlanningTask?, enabled: Boolean, configured: Boolean, onPlan: () -> Unit, onCancel: () -> Unit, onConfigure: () -> Unit, turnId: String) {
+    val running = task?.status in setOf(MemoryPlanningStatus.REQUESTED, MemoryPlanningStatus.RUNNING)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        task?.let { Text(memoryPlanningLabel(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        when {
+            running -> TextButton(onClick = onCancel, enabled = enabled) { Text("停止整理") }
+            task?.status == MemoryPlanningStatus.COMPLETED -> Unit
+            configured -> TextButton(onClick = onPlan, enabled = enabled, modifier = Modifier.testTag("plan-memory-$turnId")) { Text(if (task == null) "整理记忆" else "重新整理记忆") }
+            else -> TextButton(onClick = onConfigure, enabled = enabled) { Text("配置记忆模型以整理 · 手动记住仍可用") }
+        }
+    }
+}
+
+internal fun memoryPlanningLabel(task: MemoryPlanningTask): String = when (task.status) {
+    MemoryPlanningStatus.REQUESTED, MemoryPlanningStatus.RUNNING -> "正在整理记忆"
+    MemoryPlanningStatus.COMPLETED -> if (task.candidateCount == 0) "整理完成，没有新增候选" else "整理完成 · 新增 ${task.candidateCount} 条候选"
+    MemoryPlanningStatus.CANCELLED -> "整理已停止，可手动重试"
+    MemoryPlanningStatus.FAILED -> when (task.failure) {
+        "INTERRUPTED" -> "上次整理中断，可手动重试"
+        "SOURCE_CHANGED" -> "来源或记忆已变化，旧整理结果已失效"
+        "NETWORK" -> "记忆整理连接失败，可手动重试"
+        else -> "记忆整理未完成，请检查模型与格式"
     }
 }
 

@@ -76,13 +76,16 @@ class ProcessingRepository(private val db: RecordDatabase) {
             commitMemory(id, MemoryEvent.FromConversation(item.type.name, contentId, turn.conversationId, turn.id, turn.userContentId), "$id:propose", now, item.text, item.evidence)
             if (explicit) commitMemory(id, MemoryEvent.Confirmed, "$id:confirm", now, null, null)
         }
+        if (explicit) MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 
     suspend fun onConversationDeleted(conversationId: String, now: Long) = db.withTransaction {
+        MemoryPlanningRepository(db).deleteConversation(conversationId, now)
         memories().filter { it.sourceConversationId == conversationId && it.visible }.forEach { memory ->
             commitMemory(memory.id, MemoryEvent.Invalidated(memoryFingerprint(memory.text)), "${memory.id}:conversation-deleted", now, null, null)
             purgeHistoryContent("", memory.id)
         }
+        MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 
     suspend fun releaseLeases() = dao.clearLeases()
@@ -177,6 +180,11 @@ class ProcessingRepository(private val db: RecordDatabase) {
         val contentId = UUID.randomUUID().toString()
         dao.saveContent(ContentRow(contentId, "transcript", body, now))
         commitText(recordingId, TextEvent.TranscriptSet(contentId, TextOrigin.USER.name), "$recordingId:transcript:$contentId", now, body)
+        dao.memoriesFor(recordingId).map(MemoryRow::domain).filter { it.visible && it.sourceContentId != contentId }.forEach { item ->
+            commitMemory(item.id, MemoryEvent.Invalidated(memoryFingerprint(item.text)), "${item.id}:transcript-revised:$contentId", now, null, null)
+            purgeHistoryContent(recordingId, item.id)
+        }
+        MemoryPlanningRepository(db).invalidateSnapshots(now)
         cancelOpen(recordingId, setOf("ASR", "TITLE", "SUMMARY", "MEMORY"), now)
     }
 
@@ -204,6 +212,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
 
     suspend fun confirmMemory(id: String, now: Long) = db.withTransaction {
         commitMemory(id, MemoryEvent.Confirmed, "$id:confirm", now, null, null)
+        MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 
     suspend fun correctMemory(id: String, value: String, now: Long) = db.withTransaction {
@@ -212,6 +221,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         val contentId = UUID.randomUUID().toString()
         dao.saveContent(ContentRow(contentId, "memory", memoryBody(body, memory(id)?.evidence.orEmpty()), now))
         commitMemory(id, MemoryEvent.Corrected(contentId), "$id:correct:$contentId", now, body, memory(id)?.evidence)
+        MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 
     suspend fun forgetMemory(id: String, now: Long) = terminalMemory(id, now, "forget") { MemoryEvent.Forgotten(it) }
@@ -229,9 +239,11 @@ class ProcessingRepository(private val db: RecordDatabase) {
         commitMemory(targetId, MemoryEvent.Corrected(contentId), "$targetId:merge-from:$sourceId", now, combined, target.evidence)
         commitMemory(sourceId, MemoryEvent.Merged(targetId, memoryFingerprint(source.text)), "$sourceId:merged:$targetId", now, null, null)
         purgeHistoryContent(source.sourceRecordingId, memoryId = sourceId)
+        MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 
     suspend fun onRecordingDeleted(recordingId: String, now: Long) = db.withTransaction {
+        MemoryPlanningRepository(db).invalidateSnapshots(now)
         cancelOpen(recordingId, setOf("ASR", "TITLE", "SUMMARY", "MEMORY"), now)
         dao.memoriesFor(recordingId).map(MemoryRow::domain).filter { it.visible }.forEach { item ->
             commitMemory(item.id, MemoryEvent.Invalidated(memoryFingerprint(item.text)), "${item.id}:source-deleted", now, null, null)
@@ -254,7 +266,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         events.events().forEach { row ->
             require(row.schemaVersion == 1) { "Unsupported event schema" }
             when (row.aggregateType) {
-                "Recording", "Conversation", "AssistantTurn" -> Unit
+                "Recording", "Conversation", "AssistantTurn", "MemoryPlanning" -> Unit
                 "RecordingText" -> {
                     val recordingId = row.aggregateId.removePrefix("text:")
                     val state = texts[recordingId] ?: RecordingText(recordingId)
@@ -315,6 +327,7 @@ class ProcessingRepository(private val db: RecordDatabase) {
         val current = requireNotNull(memory(id)) { "找不到记忆" }
         commitMemory(id, event(memoryFingerprint(current.text)), "$id:$name", now, null, null)
         purgeHistoryContent(current.sourceRecordingId, memoryId = id)
+        MemoryPlanningRepository(db).invalidateSnapshots(now)
     }
 
     /** Tombstones retain metadata; all associated historic bodies must also be removed. */

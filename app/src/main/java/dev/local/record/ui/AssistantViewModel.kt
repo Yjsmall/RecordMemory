@@ -9,6 +9,7 @@ import dev.local.record.domain.AssistantTurn
 import dev.local.record.domain.Conversation
 import dev.local.record.domain.MemoryItem
 import dev.local.record.domain.MemoryKind
+import dev.local.record.domain.MemoryPlanningTask
 import dev.local.record.domain.TurnStatus
 import dev.local.record.settings.AiCapability
 import java.util.UUID
@@ -28,6 +29,9 @@ data class AssistantUiState(
     val draft: String = "",
     val provider: String = "",
     val configured: Boolean = false,
+    val memoryConfigured: Boolean = false,
+    val memoryProvider: String = "",
+    val memoryTasks: List<MemoryPlanningTask> = emptyList(),
     val ready: Boolean = false,
     val busy: Boolean = false,
     val problem: String? = null
@@ -54,12 +58,16 @@ class AssistantViewModel(private val graph: AppGraph) : ViewModel() {
         }
         viewModelScope.launch { graph.conversations.turns.collect { turns -> state.update { it.copy(allTurns = turns) } } }
         viewModelScope.launch { graph.processing.memories.collect { memories -> state.update { it.copy(memories = memories) } } }
+        viewModelScope.launch { graph.memoryPlanning.tasks.collect { tasks -> state.update { it.copy(memoryTasks = tasks) } } }
         viewModelScope.launch {
             graph.settingsRepository.settings.collect { settings ->
                 val binding = settings.configuration.binding(AiCapability.ANSWER)
                 val connection = settings.configuration.connections.firstOrNull { it.id == binding.connectionId }
                 val configured = connection != null && connection.supports(AiCapability.ANSWER) && binding.model.isNotBlank() && (!connection.bearerAuth || !settings.apiKeys[connection.id].isNullOrBlank())
-                state.update { it.copy(configured = configured, provider = connection?.let { provider -> "${provider.name} · ${binding.model}" }.orEmpty()) }
+                val memoryBinding = settings.configuration.binding(AiCapability.MEMORY)
+                val memoryConnection = settings.configuration.connections.firstOrNull { it.id == memoryBinding.connectionId }
+                val memoryConfigured = memoryConnection != null && memoryConnection.supports(AiCapability.MEMORY) && memoryBinding.model.isNotBlank() && (!memoryConnection.bearerAuth || !settings.apiKeys[memoryConnection.id].isNullOrBlank())
+                state.update { it.copy(configured = configured, provider = connection?.let { provider -> "${provider.name} · ${binding.model}" }.orEmpty(), memoryConfigured = memoryConfigured, memoryProvider = memoryConnection?.let { provider -> "${provider.name} · ${memoryBinding.model}" }.orEmpty()) }
             }
         }
     }
@@ -101,6 +109,8 @@ class AssistantViewModel(private val graph: AppGraph) : ViewModel() {
 
     fun retry(id: String) = action { graph.assistant.respond(id) }
     fun cancel(id: String) = action { graph.assistant.cancel(id) }
+    fun planMemory(id: String) = action { graph.memoryPlanner.request(id) }
+    fun cancelMemoryPlanning(id: String) = action { graph.memoryPlanner.cancel(id) }
     fun deleteConversation() {
         val id = state.value.conversationId ?: return
         action {

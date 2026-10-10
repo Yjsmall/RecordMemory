@@ -87,6 +87,9 @@ interface RecordDao {
     @Query("SELECT MAX(aggregateVersion) FROM events WHERE aggregateId = :id")
     suspend fun version(id: String): Int?
 
+    @Query("SELECT COALESCE(MAX(globalPosition), 0) FROM events WHERE aggregateType = 'Memory'")
+    suspend fun memoryRevision(): Long
+
     @Insert
     suspend fun insert(row: EventRow): Long
 
@@ -111,13 +114,15 @@ interface RecordDao {
         OutboxRow::class,
         MemoryRow::class,
         ConversationRow::class,
-        AssistantTurnRow::class
+        AssistantTurnRow::class,
+        MemoryPlanningRow::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class RecordDatabase : RoomDatabase() {
     abstract fun recordings(): RecordDao
     abstract fun processing(): ProcessingDao
     abstract fun conversations(): ConversationDao
+    abstract fun memoryPlanning(): MemoryPlanningDao
 }

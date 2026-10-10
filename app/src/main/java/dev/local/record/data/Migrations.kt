@@ -3,6 +3,12 @@ package dev.local.record.data
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS `memory_planning` (`id` TEXT NOT NULL, `version` INTEGER NOT NULL, `turnId` TEXT NOT NULL, `requestContentId` TEXT NOT NULL, `status` TEXT NOT NULL, `candidateCount` INTEGER NOT NULL, `failure` TEXT, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+    }
+}
+
 /** Adds AI content, text, jobs, outbox and memories without touching recording history. */
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {

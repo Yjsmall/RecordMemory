@@ -1,12 +1,12 @@
 # 私人助手：身份、技能与记忆架构
 
-日期：2026-10-10。状态：**下一版设计草案，尚未实现**。本文依据用户提出的 SOUL.md、应用内置且可启用／禁用的 skills、持续了解用户的私人助手需求；补充 [记忆 agent 调研](../memory-agent-research.md) 与 [事件架构](event-sourcing.md)。内置资源示例见 [模板说明](../examples/agent-workspace/README.md)。用户已明确技能随软件内置，取消先前的用户选目录方案。
+日期：2026-10-10。状态：**目标架构；0.4.1 已实现独立、手动触发的候选整理和已确认文本事实概览，其余按阶段建设**。实际范围与验证见 [记忆系统第一版](../memory-system-delivery.md)。本文依据用户提出的 SOUL.md、应用内置且可启用／禁用的 skills、持续了解用户的私人助手需求；补充 [记忆 agent 调研](../memory-agent-research.md) 与 [事件架构](event-sourcing.md)。内置资源示例见 [模板说明](../examples/agent-workspace/README.md)。用户已明确技能随软件内置，取消先前的用户选目录方案。
 
 ## 1. 选择与当前基础
 
 采用 **Kotlin 原生轻量 AgentRuntime**，沿用 Room、现有多 provider 配置、业务事件与本机文本搜索。借鉴 OpenClaw 的工作区／身份文件和 Agent Skills 的渐进加载，借鉴 LangMem 的记忆整理接口与 Memobase 的画像／时间线。不把 Node／Python agent 服务嵌入 APK，也不为此更换 Android 工具链。
 
-0.4.0 已有私人助手入口、多轮聊天、已确认记忆上下文、候选审核、纠正／忘记与版本保护。`PersonalAssistant.execute()` 当前一次调用同时产生回复和候选；没有内置技能目录／开关、主动记忆工具循环或结构化 Memory Planner。支持 Responses／Chat Completions 不代表已经支持 function calling。本文所有新模块、事件名、技能加载和 UI 均为拟建能力。
+0.4.0 已有私人助手入口、多轮聊天、已确认记忆上下文、候选审核、纠正／忘记与版本保护。0.4.1 的 `PersonalAssistant.execute()` 只提交回复，独立 `MemoryPlanner` 使用 MEMORY 绑定、用户手动触发、严格 ADD／IGNORE 输出和默认候选策略；整理任务事件可重建并在进程重启后标为中断。没有内置技能目录／开关、主动记忆工具循环或完整结构化事实／冲突规划。支持 Responses／Chat Completions 不代表已经支持 function calling。下文是目标设计，未逐项声明落地的模块、事件名、技能加载和 UI 仍为拟建能力。
 
 目标是让助手能回答「你知道我的哪些习惯」「结合我正在做的项目给建议」「用已启用的技能做周回顾」，并准确更新变化，解释依据，遵守忘记要求。先做一个可靠的个人 agent，不增加多 agent 协作。
 
@@ -206,7 +206,7 @@ Memory Planner 使用现有 MEMORY 能力的独立绑定；未配置时聊天仍
 
 每阶段验证实时投影与重建一致；为重建路径使用一调用就失败的网络／文件加载／调度替身，证明不会触发副作用。schema 迁移、已删除内容和旧请求迟到单独覆盖。真实模型评估与 mock 格式测试分开报告，使用合成非私人样本；报告误记、漏记、错误覆盖、召回和成本，不靠主观“更懂我”判定。
 
-本轮仅完成架构与模板检查，不更新 APK、不运行 Gradle，也不把上述验收表记为测试通过。
+首次架构与模板设计没有更新 APK 或运行 Gradle。后续 0.4.1 实装的构建、测试与未完成范围独立记录在 [记忆系统第一版](../memory-system-delivery.md)，不把局部结果视为整个验收表通过。
 
 ## 11. 固定快照来源
 

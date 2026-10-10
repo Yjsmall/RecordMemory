@@ -45,7 +45,7 @@ class ConversationTest {
         )
         val selected = selectAssistantMemories(memories, "怎么回答？")
         assertEquals(listOf("a"), selected.map { it.id })
-        val bounded = selectAssistantMemories((1..100).map { MemoryItem("$it", status = MemoryStatus.CONFIRMED, text = "x".repeat(500)) }, "hello")
+        val bounded = selectAssistantMemories((1..100).map { MemoryItem("$it", status = MemoryStatus.CONFIRMED, text = "x".repeat(500)) }, "我的记忆")
         assertTrue(bounded.size <= 24)
         assertTrue(bounded.sumOf { it.text.length + 60 } <= 6_000)
         assertFalse(bounded.isEmpty())

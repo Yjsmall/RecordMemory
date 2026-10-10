@@ -17,6 +17,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -31,6 +32,8 @@ import dev.local.record.audio.SessionState
 import dev.local.record.domain.AssistantTurn
 import dev.local.record.domain.MemoryItem
 import dev.local.record.domain.MemoryKind
+import dev.local.record.domain.MemoryPlanningStatus
+import dev.local.record.domain.MemoryPlanningTask
 import dev.local.record.domain.MemoryStatus
 import dev.local.record.domain.TurnStatus
 import java.io.File
@@ -54,13 +57,15 @@ class AssistantScreenTest {
     private var retried = ""
     private var cancelled = ""
     private var remembered = ""
+    private var planned = ""
+    private var planCancelled = ""
 
     private fun content() = compose.setContent {
         DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(dimensions.value)) {
             DeviceConfigurationOverride(DeviceConfigurationOverride.FontScale(font.value)) {
                 RecordTheme(appearance = if (dark.value) dev.local.record.settings.AppAppearance.DARK else dev.local.record.settings.AppAppearance.LIGHT) {
                     Surface(Modifier.fillMaxSize()) {
-                        AssistantScreen(state.value, session.value, {}, { state.value = state.value.copy(draft = it) }, { sent++ }, { retried = it }, { cancelled = it }, {}, {}, {}, { _, text, _ -> remembered = text }, { confirmed = it }, { ignored = it }, {}, { configured++ }, {}, { stopped++ })
+                        AssistantScreen(state.value, session.value, {}, { state.value = state.value.copy(draft = it) }, { sent++ }, { retried = it }, { cancelled = it }, {}, {}, {}, { _, text, _ -> remembered = text }, { confirmed = it }, { ignored = it }, {}, { configured++ }, {}, { stopped++ }, onPlanMemory = { planned = it }, onCancelMemoryPlanning = { planCancelled = it })
                     }
                 }
             }
@@ -99,6 +104,38 @@ class AssistantScreenTest {
         compose.onNodeWithTag("remember-input").performTextReplacement("周末留出半天休息")
         compose.onNodeWithText("保存记忆").performClick()
         assertEquals("周末留出半天休息", remembered)
+    }
+
+    @Test fun memoryPlanningShowsSeparateModelConsentAndActualTaskState() {
+        state.value = state.value.copy(allTurns = listOf(turn()), memoryConfigured = true, memoryProvider = "记忆服务 · memory-model")
+        content()
+        compose.onNodeWithTag("plan-memory-t").performScrollTo().performClick()
+        compose.onNodeWithText("将此条用户消息及至多 10 条相关已确认记忆发送至 记忆服务 · memory-model", substring = true).assertIsDisplayed()
+        assertEquals("", planned)
+        compose.onNodeWithText("开始整理").performClick()
+        assertEquals("t", planned)
+        compose.runOnIdle { state.value = state.value.copy(memoryTasks = listOf(MemoryPlanningTask("plan", turnId = "t", status = MemoryPlanningStatus.RUNNING))) }
+        compose.onNodeWithText("停止整理").performScrollTo().performClick()
+        assertEquals("plan", planCancelled)
+        compose.runOnIdle { state.value = state.value.copy(memoryTasks = listOf(MemoryPlanningTask("plan", turnId = "t", status = MemoryPlanningStatus.FAILED, failure = "SOURCE_CHANGED"))) }
+        compose.onNodeWithText("来源或记忆已变化，旧整理结果已失效").performScrollTo().assertIsDisplayed()
+    }
+
+    @Test fun confirmedMemoryOverviewExcludesCandidatesAndForgottenFacts() {
+        state.value = state.value.copy(
+            memories = listOf(
+                MemoryItem("confirmed", type = MemoryKind.PROJECT, status = MemoryStatus.CONFIRMED, text = "正在开发录音助手"),
+                MemoryItem("candidate", status = MemoryStatus.CANDIDATE, text = "尚未确认"),
+                MemoryItem("forgotten", status = MemoryStatus.FORGOTTEN, text = "已忘记的内容")
+            )
+        )
+        content()
+        compose.onNodeWithContentDescription("对话操作").performClick()
+        compose.onNodeWithText("已确认记忆概览").performClick()
+        compose.onNodeWithText("项目与待办").assertIsDisplayed()
+        compose.onNodeWithText("正在开发录音助手").assertIsDisplayed()
+        compose.onNodeWithText("尚未确认").assertDoesNotExist()
+        compose.onNodeWithText("已忘记的内容").assertDoesNotExist()
     }
 
     @Test fun narrowWideLargeFontAndCompactWindowsKeepComposerAndRecordingActions() {

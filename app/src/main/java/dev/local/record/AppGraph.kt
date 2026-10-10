@@ -7,12 +7,15 @@ import dagger.hilt.android.HiltAndroidApp
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dev.local.record.ai.AiProcessor
 import dev.local.record.ai.AiScheduler
+import dev.local.record.ai.MemoryPlanner
 import dev.local.record.ai.PersonalAssistant
 import dev.local.record.audio.RecordingRecovery
 import dev.local.record.audio.SessionState
 import dev.local.record.data.ConversationRepository
 import dev.local.record.data.MIGRATION_1_2
 import dev.local.record.data.MIGRATION_2_3
+import dev.local.record.data.MIGRATION_3_4
+import dev.local.record.data.MemoryPlanningRepository
 import dev.local.record.data.ProcessingRepository
 import dev.local.record.data.RecordDatabase
 import dev.local.record.data.RecordingRepository
@@ -34,7 +37,7 @@ class RecordApplication : Application() {
 /** Process-scoped dependencies and live session; recovery never opens the microphone. */
 @Singleton
 class AppGraph @Inject constructor(@ApplicationContext context: Context) {
-    val database = Room.databaseBuilder(context, RecordDatabase::class.java, "record.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build()
+    val database = Room.databaseBuilder(context, RecordDatabase::class.java, "record.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build()
     val repository = RecordingRepository(database)
     val processing = ProcessingRepository(database)
     val settingsRepository = SettingsRepository(context)
@@ -45,10 +48,13 @@ class AppGraph @Inject constructor(@ApplicationContext context: Context) {
     private val recoveryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val conversations = ConversationRepository(database)
     val assistant = PersonalAssistant(conversations, processing, settingsRepository, recoveryScope)
+    val memoryPlanning = MemoryPlanningRepository(database)
+    val memoryPlanner = MemoryPlanner(memoryPlanning, conversations, processing, settingsRepository, recoveryScope)
     private val recovery = recoveryScope.async<List<String>> {
         val messages = RecordingRecovery(repository, audioDirectory).recover(System.currentTimeMillis())
         processing.releaseLeases()
         conversations.recoverInterrupted(System.currentTimeMillis())
+        memoryPlanning.recoverInterrupted(System.currentTimeMillis())
         scheduler.kick()
         messages
     }

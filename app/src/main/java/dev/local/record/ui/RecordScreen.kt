@@ -246,7 +246,10 @@ fun RecordScreen(
                             { backStack.add(MemoriesPage) }, {
                                 settingsModel?.editBinding(AiCapability.ANSWER)
                                 backStack.add(CapabilityPage(AiCapability.ANSWER))
-                            }, onPause, onStop
+                            }, onPause, onStop, model::planMemory, model::cancelMemoryPlanning, {
+                                settingsModel?.editBinding(AiCapability.MEMORY)
+                                backStack.add(CapabilityPage(AiCapability.MEMORY))
+                            }
                         )
                     }
                 }

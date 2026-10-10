@@ -4,8 +4,12 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import dev.local.record.data.ConversationRepository
+import dev.local.record.data.MemoryDraft
+import dev.local.record.data.MemoryPlanningRepository
 import dev.local.record.data.ProcessingRepository
 import dev.local.record.data.RecordDatabase
+import dev.local.record.domain.MemoryKind
+import dev.local.record.domain.MemoryPlanningStatus
 import dev.local.record.domain.MemoryStatus
 import dev.local.record.domain.TurnStatus
 import dev.local.record.settings.AiCapability
@@ -20,8 +24,9 @@ import java.util.concurrent.TimeUnit
 import javax.net.ssl.HttpsURLConnection
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -93,6 +98,8 @@ class PersonalAssistantTest {
                 repeat(8) { assistant.respond("t1") }
                 withTimeout(10_000) { while (conversations.turn("t1")?.status != TurnStatus.ANSWERED) delay(20) }
                 server.takeRequest(3, TimeUnit.SECONDS)
+                assertTrue(processing.memories().isEmpty())
+                processing.proposeConversationMemories("t1", listOf(MemoryDraft(MemoryKind.PREFERENCE, "喜欢安静的咖啡馆", "我喜欢安静的咖啡馆")), 3)
                 val candidate = processing.memories().single()
                 assertEquals(MemoryStatus.CANDIDATE, candidate.status)
                 processing.confirmMemory(candidate.id, 3)
@@ -115,7 +122,7 @@ class PersonalAssistantTest {
                 assertEquals(3, server.requestCount)
                 assertTrue(db.processing().pending().isEmpty())
             } finally {
-                scope.cancel()
+                scope.coroutineContext[Job]?.cancelAndJoin()
                 db.close()
             }
         }
@@ -130,6 +137,58 @@ class PersonalAssistantTest {
             assertFalse(error?.message.orEmpty().contains("synthetic-key"))
             assertFalse(error?.message.orEmpty().contains("PRIVATE RESPONSE"))
             assertEquals(1, server.requestCount)
+        }
+    }
+
+    @Test fun independentMemoryModelCreatesOnlyCandidatesForBothProtocols() = runBlocking {
+        for (protocol in listOf(RESPONSES, OPENAI_COMPATIBLE)) {
+            server().use { server ->
+                val context = ApplicationProvider.getApplicationContext<Context>()
+                val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+                val id = UUID.randomUUID().toString()
+                val settings = SettingsRepository(context, "planner-test-$id.bin", "planner-test-$id", scope)
+                val db = Room.inMemoryDatabaseBuilder(context, RecordDatabase::class.java).build()
+                try {
+                    val connection = AiConnection("provider", protocol = protocol, baseUrl = server.url("/v1").toString().trimEnd('/'))
+                    settings.saveConnection(connection, "synthetic-key")
+                    settings.saveBinding(CapabilityBinding(AiCapability.ANSWER, "provider", "answer-model"))
+                    val conversations = ConversationRepository(db)
+                    val processing = ProcessingRepository(db)
+                    val plans = MemoryPlanningRepository(db)
+                    val assistant = PersonalAssistant(conversations, processing, settings, scope, gateway())
+                    val planner = MemoryPlanner(plans, conversations, processing, settings, scope, gateway())
+                    conversations.create("c", 1)
+                    conversations.request("t", "c", "我喜欢简短的回答", 2)
+                    fun enqueue(text: String) {
+                        if (protocol == RESPONSES) {
+                            server.enqueue(response(text))
+                        } else {
+                            val quoted = buildJsonObject { put("text", text) }["text"].toString()
+                            server.enqueue(MockResponse().setBody("""{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":$quoted}}]}"""))
+                        }
+                    }
+                    enqueue("以后交流时可以先说重点。")
+                    assistant.respond("t")
+                    withTimeout(10_000) { while (conversations.turn("t")?.status != TurnStatus.ANSWERED) delay(20) }
+                    assertTrue(processing.memories().isEmpty())
+                    assertTrue(runCatching { planner.request("t") }.isFailure)
+                    assertEquals(1, server.requestCount)
+                    assertTrue(requireNotNull(server.takeRequest(3, TimeUnit.SECONDS)).body.readUtf8().contains("answer-model"))
+                    settings.saveBinding(CapabilityBinding(AiCapability.MEMORY, "provider", "memory-model"))
+                    enqueue("""{"schemaVersion":1,"items":[{"action":"ADD","type":"preference","text":"喜欢简短回答","evidence":"我喜欢简短的回答"}]}""")
+                    repeat(6) { planner.request("t") }
+                    withTimeout(10_000) { while (db.memoryPlanning().all().singleOrNull()?.status != "COMPLETED") delay(20) }
+                    val request = requireNotNull(server.takeRequest(3, TimeUnit.SECONDS)).body.readUtf8()
+                    assertTrue(request.contains("memory-model"))
+                    assertFalse(request.contains("以后交流时"))
+                    assertEquals(MemoryStatus.CANDIDATE, processing.memories().single().status)
+                    assertEquals(MemoryPlanningStatus.COMPLETED, plans.task(db.memoryPlanning().all().single().id)?.status)
+                    assertEquals(2, server.requestCount)
+                } finally {
+                    scope.coroutineContext[Job]?.cancelAndJoin()
+                    db.close()
+                }
+            }
         }
     }
 }

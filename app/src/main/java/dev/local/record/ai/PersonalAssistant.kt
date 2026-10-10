@@ -1,7 +1,6 @@
 package dev.local.record.ai
 
 import dev.local.record.data.ConversationRepository
-import dev.local.record.data.MemoryDraft
 import dev.local.record.data.ProcessingRepository
 import dev.local.record.domain.AssistantContext
 import dev.local.record.domain.MemoryReference
@@ -66,7 +65,7 @@ class PersonalAssistant(
             val messages = recent.flatMap { listOf(AssistantMessage("user", it.userText), AssistantMessage("assistant", it.reply)) } + AssistantMessage("user", turn.userText)
             val output = gateway.converse(connection, binding.copy(prompt = assistantInstructions(binding.prompt, memories)), key, messages)
             val result = parseAssistantReply(output, turn.userText)
-            conversations.answer(turnId, attempt, result.text, result.memories.map { MemoryDraft(it.type, it.text, it.evidence) }, System.currentTimeMillis())
+            conversations.answer(turnId, attempt, result.text, emptyList(), System.currentTimeMillis())
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) { conversations.cancel(turnId, System.currentTimeMillis(), attempt) }
             throw cancelled
