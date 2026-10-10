@@ -8,7 +8,7 @@
 
 实现继续采用 Kotlin、Room、本机文本检索与现有模型 provider。模型提出结构化变更，应用验证来源、版本、确认状态及删除规则，然后通过事件写入。没有找到可以直接加入现有 Android 工程、同时满足全部约束的现成 Kotlin 库；下列项目适合借鉴机制和测试场景，直接运行通常需要 Python／TypeScript 及额外服务。
 
-SOUL.md 身份、自选目录 skills、主动回忆工具与整套记忆生命周期的进一步设计见 [私人助手架构](architecture/personal-agent.md)，并附 [工作区模板](examples/agent-workspace/README.md)。这些属于下一版方案，尚未加入 0.4.0。
+SOUL.md 身份、应用内置且可启用／禁用的 skills、主动回忆工具与整套记忆生命周期的进一步设计见 [私人助手架构](architecture/personal-agent.md)，并附 [内置资源模板](examples/agent-workspace/README.md)。这些属于下一版方案，尚未加入 0.4.0。
 
 ## 选型比较
 
