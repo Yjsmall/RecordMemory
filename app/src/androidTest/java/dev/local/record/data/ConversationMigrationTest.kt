@@ -1,0 +1,39 @@
+package dev.local.record.data
+
+import androidx.room.testing.MigrationTestHelper
+import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+
+class ConversationMigrationTest {
+    @get:Rule val helper = MigrationTestHelper(InstrumentationRegistry.getInstrumentation(), RecordDatabase::class.java)
+
+    @Test fun versionTwoMemoriesAndContentSurviveUpgrade() {
+        val name = "conversation-migration-2-3"
+        InstrumentationRegistry.getInstrumentation().targetContext.deleteDatabase(name)
+        helper.createDatabase(name, 2).use { db ->
+            db.execSQL("INSERT INTO memories VALUES ('m', 2, 'PREFERENCE', 'CONFIRMED', '旧偏好', '旧依据', 'body', 'recording', 'transcript', '')")
+            db.execSQL("INSERT INTO contents VALUES ('body', 'memory', 'historic-body', 1)")
+        }
+        helper.runMigrationsAndValidate(name, 3, true, MIGRATION_2_3).use { db ->
+            db.query("SELECT text, sourceConversationId, sourceTurnId FROM memories WHERE id = 'm'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("旧偏好", cursor.getString(0))
+                assertEquals("", cursor.getString(1))
+                assertEquals("", cursor.getString(2))
+            }
+            db.query("SELECT body FROM contents WHERE id = 'body'").use { cursor ->
+                cursor.moveToFirst()
+                assertEquals("historic-body", cursor.getString(0))
+            }
+        }
+    }
+
+    @Test fun initialRecordingDatabaseCanUpgradeThroughBothMigrations() {
+        val name = "conversation-migration-1-3"
+        InstrumentationRegistry.getInstrumentation().targetContext.deleteDatabase(name)
+        helper.createDatabase(name, 1).close()
+        helper.runMigrationsAndValidate(name, 3, true, MIGRATION_1_2, MIGRATION_2_3).close()
+    }
+}

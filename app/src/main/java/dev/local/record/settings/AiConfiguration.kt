@@ -48,7 +48,7 @@ enum class AiCapability(val label: String, val destination: String, val defaultP
     TITLE("智能标题", "发送转写文本", "根据原文给出一个简短中文标题，不超过 20 个字。只输出标题，不添加未提及的事实。"),
     SUMMARY("内容总结", "发送转写文本", "忠实总结原文。短记录给出简短摘要，长记录列出要点。只在原文有依据时提取待办和日期，信息不足时保留不确定性。"),
     MEMORY("记忆提取", "发送转写及相关记忆", "从原文提取人物、项目、偏好、约定或待办候选，并注明来源。不把想法或一次提及推断为长期事实；不确定时不提取。"),
-    ANSWER("记忆问答", "发送问题及选定的本地文本片段", "只依据提供的检索片段回答，标注来源引用。未找到依据时说明未找到，不编造事实或音频时间戳。")
+    ANSWER("私人助手", "发送对话及已确认记忆", "你是我的私人助手。结合我已确认的记忆与当前对话，帮助我思考、规划和整理事情。用自然、简洁的中文交流；区分已知事实、建议与不确定的信息，不编造我的经历或偏好。")
 }
 
 @Serializable
@@ -99,7 +99,11 @@ data class AiConfiguration(
     val dynamicColors: Boolean = false,
     val processingMode: ProcessingMode = ProcessingMode.AUTO
 ) {
-    fun binding(capability: AiCapability) = bindings.firstOrNull { it.capability == capability } ?: CapabilityBinding(capability)
+    fun binding(capability: AiCapability): CapabilityBinding {
+        val binding = bindings.firstOrNull { it.capability == capability } ?: CapabilityBinding(capability)
+        val legacy = "只依据提供的检索片段回答，标注来源引用。未找到依据时说明未找到，不编造事实或音频时间戳。"
+        return if (capability == AiCapability.ANSWER && binding.prompt == legacy) binding.copy(prompt = capability.defaultPrompt) else binding
+    }
 }
 
 /** Kept only in the encrypted local DataStore, never in portable configuration or events. */

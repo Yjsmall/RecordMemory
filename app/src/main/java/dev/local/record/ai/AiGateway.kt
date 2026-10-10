@@ -39,6 +39,13 @@ class AiGateway internal constructor(
         parseDiagnosticOutput(connection.protocol, source)
     }
 
+    suspend fun converse(connection: AiConnection, binding: CapabilityBinding, apiKey: String?, messages: List<AssistantMessage>): String = withContext(Dispatchers.IO) {
+        val path = if (connection.protocol == RESPONSES) connection.responsesPath else connection.chatPath
+        val body = conversationBody(connection, binding, messages)
+        val source = post(endpoint(connection, path), connection, apiKey, body.toByteArray(), "application/json; charset=utf-8", 60_000, null)
+        parseDiagnosticOutput(connection.protocol, source)
+    }
+
     private suspend fun openAi(connection: AiConnection, binding: CapabilityBinding, apiKey: String?, audio: File): String {
         require(audio.length() in 1..24L * 1024 * 1024) { "音频为空或超过 24 MB，无法上传转写" }
         val boundary = "record-${UUID.randomUUID()}"
@@ -142,5 +149,39 @@ internal fun completionBody(connection: AiConnection, binding: CapabilityBinding
             )
         )
         put("max_tokens", 2_048)
+    }
+}.toString()
+
+data class AssistantMessage(val role: String, val text: String)
+
+internal fun conversationBody(connection: AiConnection, binding: CapabilityBinding, messages: List<AssistantMessage>): String = buildJsonObject {
+    require(messages.isNotEmpty() && messages.all { it.role in setOf("user", "assistant") && it.text.isNotBlank() })
+    put("model", binding.model.trim())
+    put("stream", false)
+    put("store", false)
+    val turns = messages.map { message ->
+        buildJsonObject {
+            put("role", message.role)
+            put("content", message.text)
+        }
+    }
+    if (connection.protocol == RESPONSES) {
+        put("input", JsonArray(turns))
+        put("instructions", binding.prompt)
+        put("max_output_tokens", 4_096)
+        if (binding.reasoningEffort.isNotEmpty()) putJsonObject("reasoning") { put("effort", binding.reasoningEffort) }
+    } else {
+        put(
+            "messages",
+            JsonArray(
+                listOf(
+                    buildJsonObject {
+                        put("role", "system")
+                        put("content", binding.prompt)
+                    }
+                ) + turns
+            )
+        )
+        put("max_tokens", 4_096)
     }
 }.toString()

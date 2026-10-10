@@ -109,12 +109,15 @@ interface RecordDao {
         RecordingTextRow::class,
         AiJobRow::class,
         OutboxRow::class,
-        MemoryRow::class
+        MemoryRow::class,
+        ConversationRow::class,
+        AssistantTurnRow::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = true
 )
 abstract class RecordDatabase : RoomDatabase() {
     abstract fun recordings(): RecordDao
     abstract fun processing(): ProcessingDao
+    abstract fun conversations(): ConversationDao
 }

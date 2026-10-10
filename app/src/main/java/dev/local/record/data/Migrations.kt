@@ -19,3 +19,13 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         )
     }
 }
+
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `memories` ADD COLUMN `sourceConversationId` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `memories` ADD COLUMN `sourceTurnId` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `conversations` (`id` TEXT NOT NULL, `version` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `deleted` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `assistant_turns` (`id` TEXT NOT NULL, `version` INTEGER NOT NULL, `conversationId` TEXT NOT NULL, `sequence` INTEGER NOT NULL, `status` TEXT NOT NULL, `attempt` INTEGER NOT NULL, `userContentId` TEXT NOT NULL, `contextContentId` TEXT, `replyContentId` TEXT, `userText` TEXT NOT NULL, `reply` TEXT NOT NULL, `failure` TEXT, PRIMARY KEY(`id`))")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_assistant_turns_conversationId_sequence` ON `assistant_turns` (`conversationId`, `sequence`)")
+    }
+}

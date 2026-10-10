@@ -59,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
@@ -85,6 +86,9 @@ data class Detail(val id: String) : NavKey
 
 @Serializable
 data object MemoriesPage : NavKey
+
+@Serializable
+data class AssistantPage(val conversationId: String? = null) : NavKey
 
 @Serializable
 data object SettingsPage : NavKey
@@ -127,7 +131,8 @@ fun RecordScreen(
     onForgetMemory: (String) -> Unit = {},
     onDisableMemory: (String) -> Unit = {},
     onCorrectMemory: (String, String) -> Unit = { _, _ -> },
-    onMergeMemory: (String, String) -> Unit = { _, _ -> }
+    onMergeMemory: (String, String) -> Unit = { _, _ -> },
+    assistantModel: AssistantViewModel? = null
 ) {
     val backStack = rememberNavBackStack(Library)
     var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -179,6 +184,7 @@ fun RecordScreen(
                         onDelete = { deleteId = it.id },
                         onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
                         onMemories = { backStack.add(MemoriesPage) },
+                        onAssistant = { backStack.add(AssistantPage()) },
                         onSelect = { id ->
                             while (backStack.size > 1) backStack.removeLastOrNull()
                             backStack.add(Detail(id))
@@ -220,11 +226,28 @@ fun RecordScreen(
                             Text("记忆", style = MaterialTheme.typography.titleLarge)
                         }
                         MemoryLibrary(memories, onConfirmMemory, onForgetMemory, onDisableMemory, onCorrectMemory, onMergeMemory, onOpenSource = { id ->
-                            if (recordings.any { it.id == id }) {
+                            if (id.startsWith("chat:")) {
+                                backStack.add(AssistantPage(id.removePrefix("chat:")))
+                            } else if (recordings.any { it.id == id }) {
                                 while (backStack.size > 1) backStack.removeLastOrNull()
                                 backStack.add(Detail(id))
                             }
                         })
+                    }
+                }
+                entry<AssistantPage> { page ->
+                    val model = assistantModel
+                    if (model != null) {
+                        val assistantState by model.state.collectAsStateWithLifecycle()
+                        LaunchedEffect(page.conversationId) { page.conversationId?.let(model::select) }
+                        AssistantScreen(
+                            assistantState, session, { backStack.removeLastOrNull() }, model::draft, model::send, model::retry, model::cancel,
+                            model::newConversation, model::select, model::deleteConversation, model::remember, onConfirmMemory, onForgetMemory,
+                            { backStack.add(MemoriesPage) }, {
+                                settingsModel?.editBinding(AiCapability.ANSWER)
+                                backStack.add(CapabilityPage(AiCapability.ANSWER))
+                            }, onPause, onStop
+                        )
                     }
                 }
                 entry<SettingsPage> {
@@ -310,6 +333,7 @@ private fun LibraryPane(
     onDelete: (Recording) -> Unit,
     onSettings: (() -> Unit)?,
     onMemories: () -> Unit,
+    onAssistant: () -> Unit,
     onSelect: (String) -> Unit
 ) {
     val scroll = rememberLazyListState()
@@ -333,6 +357,18 @@ private fun LibraryPane(
             }
         }
         item { RecordingControls(session, ready, onStart, onPause, onStop) }
+        item {
+            Surface(onClick = onAssistant, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth().testTag("open-assistant")) {
+                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    IconBadge(RecordIcons.Chat)
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("私人助手", style = MaterialTheme.typography.titleMedium)
+                        Text("聊聊想法，继续了解你", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Icon(RecordIcons.Next, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
         if (!notificationsAllowed) {
             item {
                 Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainer) {

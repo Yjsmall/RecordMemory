@@ -206,6 +206,10 @@ sealed interface MemoryEvent {
     data class Proposed(@SerialName("memoryKind") val type: String, val contentId: String, val sourceRecordingId: String, val sourceContentId: String) : MemoryEvent
 
     @Serializable
+    @SerialName("ConversationMemoryProposed")
+    data class FromConversation(@SerialName("memoryKind") val type: String, val contentId: String, val conversationId: String, val turnId: String, val sourceContentId: String) : MemoryEvent
+
+    @Serializable
     @SerialName("MemoryConfirmed")
     data object Confirmed : MemoryEvent
 
@@ -237,7 +241,9 @@ data class MemoryItem(
     val contentId: String = "",
     val sourceRecordingId: String = "",
     val sourceContentId: String = "",
-    val fingerprint: String = ""
+    val fingerprint: String = "",
+    val sourceConversationId: String = "",
+    val sourceTurnId: String = ""
 ) {
     val visible: Boolean get() = status == MemoryStatus.CANDIDATE || status == MemoryStatus.CONFIRMED
 }
@@ -254,6 +260,7 @@ fun evolveMemory(state: MemoryItem, event: MemoryEvent, text: String?, evidence:
             sourceContentId = event.sourceContentId
         )
         MemoryEvent.Confirmed -> state.copy(status = MemoryStatus.CONFIRMED)
+        is MemoryEvent.FromConversation -> state.copy(type = MemoryKind.valueOf(event.type), status = MemoryStatus.CANDIDATE, text = text.orEmpty(), evidence = evidence.orEmpty(), contentId = event.contentId, sourceConversationId = event.conversationId, sourceTurnId = event.turnId, sourceContentId = event.sourceContentId)
         is MemoryEvent.Corrected -> state.copy(status = MemoryStatus.CONFIRMED, text = text.orEmpty(), evidence = evidence ?: state.evidence, contentId = event.contentId, fingerprint = "")
         is MemoryEvent.Forgotten -> state.copy(status = MemoryStatus.FORGOTTEN, text = "", evidence = "", fingerprint = event.fingerprint)
         is MemoryEvent.Invalidated -> state.copy(status = MemoryStatus.INVALIDATED, text = "", evidence = "", fingerprint = event.fingerprint)
@@ -267,6 +274,7 @@ fun validateMemory(state: MemoryItem, event: MemoryEvent) {
     require(
         when (event) {
             is MemoryEvent.Proposed -> state.version == 0 && event.contentId.isNotBlank() && event.sourceRecordingId.isNotBlank()
+            is MemoryEvent.FromConversation -> state.version == 0 && event.contentId.isNotBlank() && event.conversationId.isNotBlank() && event.turnId.isNotBlank() && event.sourceContentId.isNotBlank()
             MemoryEvent.Confirmed -> state.status == MemoryStatus.CANDIDATE
             is MemoryEvent.Corrected -> active && event.contentId.isNotBlank()
             is MemoryEvent.Forgotten -> active && event.fingerprint.isNotBlank()

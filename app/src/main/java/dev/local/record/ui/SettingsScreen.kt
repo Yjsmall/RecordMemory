@@ -108,7 +108,6 @@ fun SettingsHome(state: SettingsUiState, model: SettingsViewModel, onConnection:
             SettingsRow(
                 capability.label,
                 when {
-                    capability == AiCapability.ANSWER -> "暂未接入"
                     connection == null -> "未配置"
                     connection.protocol !in supportedProtocols -> "协议待配置"
                     binding.model.isBlank() -> "${connection.name} · 选择模型"

@@ -22,6 +22,7 @@ import dev.local.record.audio.RecordingService
 import dev.local.record.audio.SessionPhase
 import dev.local.record.audio.SessionState
 import dev.local.record.settings.AppAppearance
+import dev.local.record.ui.AssistantViewModel
 import dev.local.record.ui.LibraryViewModel
 import dev.local.record.ui.RecordScreen
 import dev.local.record.ui.RecordTheme
@@ -58,6 +59,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val model = ViewModelProvider(this, LibraryViewModel.Factory(applicationContext, graph))[LibraryViewModel::class.java]
         val settingsModel = ViewModelProvider(this, SettingsViewModel.Factory(graph.settingsRepository))[SettingsViewModel::class.java]
+        val assistantModel = ViewModelProvider(this, AssistantViewModel.Factory(graph))[AssistantViewModel::class.java]
         setContent {
             val recordings by model.recordings.collectAsStateWithLifecycle()
             val session by model.session.collectAsStateWithLifecycle()
@@ -100,7 +102,8 @@ class MainActivity : ComponentActivity() {
                     onForgetMemory = model::forgetMemory,
                     onDisableMemory = model::disableMemory,
                     onCorrectMemory = model::correctMemory,
-                    onMergeMemory = model::mergeMemory
+                    onMergeMemory = model::mergeMemory,
+                    assistantModel = assistantModel
                 )
             }
         }

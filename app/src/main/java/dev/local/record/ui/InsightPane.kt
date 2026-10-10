@@ -201,10 +201,10 @@ internal fun MemoryLibrary(
         }
         if (filtered.isEmpty()) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                EmptyContent(RecordIcons.Memory, if (candidates) "没有待确认的记忆" else "留住值得记住的事", if (candidates) "新候选会出现在这里" else "从录音原文中提取记忆，再由你确认")
+                EmptyContent(RecordIcons.Memory, if (candidates) "没有待确认的记忆" else "留住值得记住的事", if (candidates) "新候选会出现在这里" else "来自录音与对话，由你确认")
             }
         }
-        items(filtered, key = { it.id }) { memory -> MemoryCard(memory, visible.filter { it.id != memory.id }, onConfirm, onForget, onDisable, onCorrect, onMerge, onOpenSource) }
+        items(filtered, key = { it.id }) { memory -> MemoryCard(memory, visible.filter { it.id != memory.id && it.sourceRecordingId == memory.sourceRecordingId && it.sourceConversationId == memory.sourceConversationId }, onConfirm, onForget, onDisable, onCorrect, onMerge, onOpenSource) }
     }
 }
 
@@ -259,7 +259,7 @@ private fun MemoryCard(memory: MemoryItem, others: List<MemoryItem>, onConfirm: 
             if (evidence && memory.evidence.isNotBlank()) Text(memory.evidence, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (memory.evidence.isNotBlank()) TextButton(onClick = { evidence = !evidence }) { Text(if (evidence) "收起依据" else "查看依据") }
-                if (onOpenSource != null) TextButton(onClick = { onOpenSource(memory.sourceRecordingId) }) { Text("原录音") }
+                if (onOpenSource != null) TextButton(onClick = { onOpenSource(if (memory.sourceConversationId.isNotBlank()) "chat:${memory.sourceConversationId}" else memory.sourceRecordingId) }) { Text(if (memory.sourceConversationId.isNotBlank()) "原对话" else "原录音") }
                 if (memory.status == MemoryStatus.CANDIDATE) FilledTonalButton(onClick = { onConfirm(memory.id) }, modifier = Modifier.testTag("confirm-memory-${memory.id}")) { Text("确认记忆") }
             }
         }
@@ -269,7 +269,7 @@ private fun MemoryCard(memory: MemoryItem, others: List<MemoryItem>, onConfirm: 
         AlertDialog(
             onDismissRequest = { terminal = null },
             title = { Text("${terminal}这条记忆？") },
-            text = { Text(if (terminal == "忘记") "将移除记忆正文，同一录音不会再次提出它。" else "这条记忆将不再使用，同一录音不会再次提出它。") },
+            text = { Text(if (terminal == "忘记") "将移除记忆正文，后续不会作为个人记忆使用。原始录音或对话保留。" else "这条记忆将不再作为个人记忆使用。") },
             confirmButton = {
                 TextButton(onClick = {
                     if (terminal == "忘记") onForget(memory.id) else onDisable(memory.id)

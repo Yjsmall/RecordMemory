@@ -1,5 +1,6 @@
 package dev.local.record.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.Insert
@@ -90,14 +91,16 @@ data class MemoryRow(
     val contentId: String,
     val sourceRecordingId: String,
     val sourceContentId: String,
-    val fingerprint: String
+    val fingerprint: String,
+    @ColumnInfo(defaultValue = "''") val sourceConversationId: String = "",
+    @ColumnInfo(defaultValue = "''") val sourceTurnId: String = ""
 ) {
-    fun domain() = MemoryItem(id, version, MemoryKind.valueOf(type), MemoryStatus.valueOf(status), text, evidence, contentId, sourceRecordingId, sourceContentId, fingerprint)
+    fun domain() = MemoryItem(id, version, MemoryKind.valueOf(type), MemoryStatus.valueOf(status), text, evidence, contentId, sourceRecordingId, sourceContentId, fingerprint, sourceConversationId, sourceTurnId)
 
     companion object {
         fun from(state: MemoryItem) = MemoryRow(
             state.id, state.version, state.type.name, state.status.name, state.text, state.evidence, state.contentId,
-            state.sourceRecordingId, state.sourceContentId, state.fingerprint
+            state.sourceRecordingId, state.sourceContentId, state.fingerprint, state.sourceConversationId, state.sourceTurnId
         )
     }
 }
