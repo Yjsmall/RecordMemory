@@ -56,7 +56,7 @@ class RecordingService : Service() {
                 setShowBadge(false)
             }
         )
-        AtomicIsland.initialize(this)
+        NotificationDiagnostics.record(this, "scene", AtomicIsland.sceneStatus(this))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -278,13 +278,19 @@ class RecordingService : Service() {
         val state = graph.session.value
         if (AtomicIsland.supportedDevice() && state.phase in setOf(SessionPhase.RECORDING, SessionPhase.PAUSED)) {
             runCatching {
+                val nextRevision = islandRevision + 1
                 val card = NotificationCompat.Builder(this, CHANNEL)
                     .setSmallIcon(R.drawable.ic_mic).setContentTitle("随声记")
                     .setContentText(formatDuration(state.durationMs)).setContentIntent(openPending())
                     .setOnlyAlertOnce(true).setSilent(true).setOngoing(true)
-                    .addExtras(AtomicIsland.extras(this, formatDuration(state.durationMs), state.phase == SessionPhase.PAUSED, ++islandRevision, openPending()))
+                    .addExtras(AtomicIsland.extras(this, formatDuration(state.durationMs), state.phase == SessionPhase.PAUSED, nextRevision, openPending()))
                     .build()
-                manager.notify(AtomicIsland.TAG, AtomicIsland.ID, card)
+                // Official create/update sample uses the same untagged notification ID.
+                manager.notify(AtomicIsland.ID, card)
+                islandRevision = nextRevision
+                NotificationDiagnostics.record(this, "post", "notify 已返回（显示待真机确认）")
+            }.onFailure { error ->
+                NotificationDiagnostics.record(this, "post", "发送失败：${error.javaClass.simpleName}")
             }
         }
         RecordingWidget.updateAll(this, graph.session.value)
@@ -348,9 +354,12 @@ class RecordingService : Service() {
         if (islandRevision == 0) return
         runCatching {
             val manager = getSystemService(NotificationManager::class.java)
-            val end = NotificationCompat.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_mic).setSilent(true).addExtras(AtomicIsland.endExtras()).build()
-            manager.notify(AtomicIsland.TAG, AtomicIsland.ID, end)
+            // Official cancel path; also remove the untagged record and previous-version card.
             manager.cancel(AtomicIsland.TAG, AtomicIsland.ID)
+            manager.cancel(AtomicIsland.ID)
+            NotificationDiagnostics.record(this, "end", "取消请求已返回")
+        }.onFailure { error ->
+            NotificationDiagnostics.record(this, "end", "取消失败：${error.javaClass.simpleName}")
         }
         islandRevision = 0
     }
@@ -361,7 +370,7 @@ class RecordingService : Service() {
         const val PAUSE = "dev.local.record.PAUSE"
         const val RESUME = "dev.local.record.RESUME"
         const val DISCARD = "dev.local.record.DISCARD"
-        private const val CHANNEL = "recording-live"
+        internal const val CHANNEL = "recording-live"
         private const val NOTIFICATION = 100
 
         fun command(context: Context, action: String) {

@@ -6,6 +6,8 @@
 
 0.3.1 打磨总结／原文／记忆界面，修正 AI 迟到结果和历史正文清理，并调整 OriginOS 原子岛通知。保存后可转写、生成标题／总结和记忆候选；开启自动处理且配置有效服务后会上传音频与相关文本。关闭自动处理时只在详情中手动触发。问答尚未接通。OriginOS 桌面入口可在原子组件中搜索「随声记」；原子岛依赖 ROM 支持与授权，需真机验收。详见 [新增功能 review 与交付](docs/feature-review-delivery.md)。
 
+0.3.2 按 vivo 官方文档调整原子通知并增加可复制诊断。官方接入要求应用上架、申请场景准入及平台开通权限；当前不能保证 OriginOS 7 胶囊出现。来源、改动、接入材料草稿与真机步骤见 [原子通知接入核对](docs/vivo-atomic-notification.md)。
+
 ## 构建
 
 需要 JDK 21（编译目标 Java 17）、Android SDK Platform 36、Build Tools 36.0.0。`local.properties` 设置 `sdk.dir`，不纳入版本控制。

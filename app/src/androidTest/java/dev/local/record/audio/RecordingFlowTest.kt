@@ -71,10 +71,20 @@ class RecordingFlowTest {
                 parcel.recycle()
             }
             assertEquals(0, card.getInt("notification.superx.operation"))
-            assertNotNull(card.getBundle("notification.superx.island")?.getBundle("island.superx.baseInfos"))
+            assertEquals(4, card.getInt("notification.superx.template"))
+            assertEquals(0x111, card.getInt("notification.superx.displays"))
+            val island = requireNotNull(card.getBundle("notification.superx.island"))
+            assertEquals(4, island.getInt("island.superx.template"))
+            assertNotNull(island.getBundle("island.superx.rightInfo")?.getParcelable<PendingIntent>("island.superx.rightInfo.clickResp"))
+            val capsule = requireNotNull(card.getBundle("notification.superx.capsule"))
+            assertEquals(1, capsule.getInt("notification.superx.capsule.state"))
+            assertTrue(capsule.getInt("notification.superx.capsule.contentColor") != capsule.getInt("notification.superx.capsule.bgColor"))
+            assertEquals(1, AtomicIsland.extras(context, "00:02", false, 2, live.contentIntent).getInt("notification.superx.operation"))
+            val base = requireNotNull(card.getBundle("notification.superx.baseInfos"))
+
             @Suppress("DEPRECATION")
-            val buttons = requireNotNull(card.getBundle("notification.superx.infos")?.getParcelableArrayList<PendingIntent>("notification.superx.infos.btnClickRespList"))
-            buttons[0].send()
+            val atomicStop = requireNotNull(base.getParcelable<PendingIntent>("notification.superx.baseInfos.subInfoClickResp"))
+            live.actions[0].actionIntent.send()
             waitUntil { graph.session.value.phase == SessionPhase.PAUSED }
             SystemClock.sleep(300)
             val pausedAt = graph.session.value.durationMs
@@ -88,13 +98,13 @@ class RecordingFlowTest {
             scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
             SystemClock.sleep(1_000)
             assertTrue(graph.session.value.durationMs > pausedAt)
-            notifications.activeNotifications.first { it.id == 100 }.notification.actions[1].actionIntent.send()
+            atomicStop.send()
             waitUntil { !graph.session.value.active }
             val recording = runBlocking { graph.repository.get(id) }
             assertEquals(RecordingStatus.SAVED, recording?.status)
             val file = File(graph.audioDirectory, requireNotNull(recording?.fileName))
             assertNotNull(AudioFile.duration(file))
-            waitUntil { notifications.activeNotifications.none { it.id == 100 || it.tag == AtomicIsland.TAG } }
+            waitUntil { notifications.activeNotifications.none { it.id == 100 || it.id == AtomicIsland.ID || it.tag == AtomicIsland.TAG } }
             val wav = File(context.cacheDir, "flow-test.wav")
             try {
                 WavAudio.transcode(file, wav)
