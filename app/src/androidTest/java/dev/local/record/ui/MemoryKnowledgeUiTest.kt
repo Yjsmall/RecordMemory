@@ -48,7 +48,7 @@ class MemoryKnowledgeUiTest {
             RecordTheme { MemoryLibrary(listOf(tombstone), {}, {}, {}, { _, _ -> }, { _, _ -> }, onAllowRelearning = { allowed = it }) }
         }
         compose.onNodeWithTag("memory-forgotten").assertDoesNotExist()
-        compose.onNodeWithText("防重新学习范围 1").performClick()
+        compose.onNodeWithText("已忘记的范围 1").performClick()
         compose.onNodeWithText("我 · 咖啡习惯").assertExists()
         compose.onNodeWithTag("allow-relearning-forgotten").performClick()
         assertEquals("", allowed)
@@ -57,5 +57,12 @@ class MemoryKnowledgeUiTest {
         compose.onNodeWithTag("allow-relearning-forgotten").performClick()
         compose.onNodeWithText("允许").performClick()
         assertEquals("forgotten", allowed)
+    }
+
+    @Test fun confirmedButExpiredFactShowsThatItIsNotCurrentlyEffective() {
+        val expired = MemoryItem("expired", status = MemoryStatus.CONFIRMED, text = "去年负责界面设计", fact = MemoryFact("self", "project.status", scope = "随声记", validUntil = "2000-01-01"))
+        compose.setContent { RecordTheme { MemoryLibrary(listOf(expired), {}, {}, {}, { _, _ -> }, { _, _ -> }) } }
+        compose.onNodeWithText("已确认").assertExists()
+        compose.onNodeWithText("当前未生效").assertExists()
     }
 }

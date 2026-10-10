@@ -3,6 +3,7 @@ package dev.local.record.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -197,13 +198,16 @@ internal fun MemoryLibrary(
     var allowing by rememberSaveable { mutableStateOf<String?>(null) }
     val rules = memories.filter { it.suppressionKey.isNotBlank() }.distinctBy { it.suppressionKey }
     val visible = memories.filter { it.visible }
-    val filtered = visible.filter { !candidates || it.status == MemoryStatus.CANDIDATE }
+    val filtered = visible.filter { !candidates || it.status == MemoryStatus.CANDIDATE }.sortedBy { if (it.status == MemoryStatus.CANDIDATE) 0 else 1 }
     LazyVerticalGrid(columns = GridCells.Adaptive(300.dp), modifier = Modifier.fillMaxSize().testTag("memory-library"), contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item(span = { GridItemSpan(maxLineSpan) }) {
-            androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FilterChip(selected = !candidates, onClick = { candidates = false }, label = { Text("全部 ${visible.size}") })
-                FilterChip(selected = candidates, onClick = { candidates = true }, label = { Text("待确认 ${visible.count { it.status == MemoryStatus.CANDIDATE }}") })
-                if (rules.isNotEmpty()) TextButton(onClick = { suppressed = !suppressed }) { Text("防重新学习范围 ${rules.size}") }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("待确认的内容经你审核后，才会用于后续对话。可随时查看依据、纠正或忘记。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    FilterChip(selected = !candidates, onClick = { candidates = false }, label = { Text("全部 ${visible.size}") })
+                    FilterChip(selected = candidates, onClick = { candidates = true }, label = { Text("待确认 ${visible.count { it.status == MemoryStatus.CANDIDATE }}") })
+                    if (rules.isNotEmpty()) TextButton(onClick = { suppressed = !suppressed }) { Text("已忘记的范围 ${rules.size}") }
+                }
             }
         }
         if (suppressed) {
@@ -236,11 +240,7 @@ internal fun MemoryLibrary(
 
 @Composable
 private fun EmptyContent(icon: ImageVector, title: String, subtitle: String) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        IconBadge(icon, size = 64)
-        Text(title, style = MaterialTheme.typography.titleMedium)
-        Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
+    EmptyState(icon, title, subtitle)
 }
 
 @Composable
@@ -256,9 +256,14 @@ private fun MemoryCard(memory: MemoryItem, others: List<MemoryItem>, onConfirm: 
         Column(Modifier.padding(20.dp).testTag("memory-${memory.id}"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(memory.type.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    Text(memory.changeLabel(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp))
-                }
+                StatusPill(
+                    when (memory.status) {
+                        MemoryStatus.CANDIDATE -> "待确认"
+                        MemoryStatus.CONFIRMED -> "已确认"
+                        else -> "已停用"
+                    },
+                    emphasized = memory.status == MemoryStatus.CANDIDATE
+                )
                 Box {
                     IconButton(onClick = { menu = true }, modifier = Modifier.testTag("memory-menu-${memory.id}")) { Icon(RecordIcons.More, "记忆操作") }
                     DropdownMenu(menu, onDismissRequest = { menu = false }) {
@@ -283,6 +288,8 @@ private fun MemoryCard(memory: MemoryItem, others: List<MemoryItem>, onConfirm: 
                     }
                 }
             }
+            val changeLabel = memory.changeLabel()
+            if (memory.change != null || changeLabel == "当前未生效") Text(changeLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             SelectionContainer { Text(memory.text, style = MaterialTheme.typography.bodyLarge) }
             MemoryKnowledgeDetails(memory, others + memory)
             if (evidence) {

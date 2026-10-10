@@ -112,6 +112,8 @@ class RecordScreenTest {
             for (height in listOf(400, 500, 1000)) {
                 compose.runOnIdle { dimensions.value = DpSize(width.dp, height.dp) }
                 compose.onNodeWithText("停止并保存").performScrollTo().assertExists()
+                compose.onNodeWithTag("start-recording").assertDoesNotExist()
+                if (width < 840) compose.onNodeWithTag("detail-placeholder").assertDoesNotExist()
                 screenshot("recording-${width}x$height")
             }
         }

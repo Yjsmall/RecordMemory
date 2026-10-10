@@ -5,15 +5,18 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -71,7 +75,7 @@ private fun IdentitySettings(state: SettingsUiState, model: SettingsViewModel) {
         enabled = !state.busy && state.defaultSoul.isNotBlank(),
         modifier = Modifier.fillMaxWidth().testTag("agent-soul-editor")
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         TextButton(onClick = model::restoreDefaultSoul, enabled = !state.busy && state.defaultSoul.isNotBlank()) { Text("恢复内置默认") }
         if (state.configuration?.binding(AiCapability.ANSWER)?.prompt != AiCapability.ANSWER.defaultPrompt) {
             TextButton(onClick = model::usePreviousAnswerPrompt, enabled = !state.busy) { Text("使用原助手提示词作草稿") }
@@ -93,17 +97,18 @@ private fun IdentitySettings(state: SettingsUiState, model: SettingsViewModel) {
 private fun SkillSettings(state: SettingsUiState, model: SettingsViewModel) {
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     Text("启用后可按任务选用，或在对话中输入 /技能名称。关闭会停止正在使用该技能的回答。", style = MaterialTheme.typography.bodyMedium)
-    ToolCapabilityStatus(state)
+    SectionLabel("可用技能", "${state.agentSkills.count { it.enabled(state.agentPreferences) }} 项已启用")
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val selected = state.agentSkills.firstOrNull { it.id == selectedId }
         val list: @Composable () -> Unit = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.agentSkills.forEach { skill ->
-                    Card(Modifier.fillMaxWidth().clickable { selectedId = if (selectedId == skill.id) null else skill.id }.testTag("agent-skill-${skill.id}")) {
-                        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Column(Modifier.weight(1f)) {
+                    Surface(onClick = { selectedId = if (selectedId == skill.id) null else skill.id }, shape = MaterialTheme.shapes.medium, color = if (selectedId == skill.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth().testTag("agent-skill-${skill.id}")) {
+                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(skill.name, style = MaterialTheme.typography.titleMedium)
-                                Text(skill.description.substringBefore('。'), style = MaterialTheme.typography.bodySmall)
+                                Text(skill.description.substringBefore('。'), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(if (selectedId == skill.id) "收起详情" else "查看用法与详情", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                             }
                             Switch(
                                 checked = skill.enabled(state.agentPreferences),
@@ -128,11 +133,13 @@ private fun SkillSettings(state: SettingsUiState, model: SettingsViewModel) {
             }
         }
     }
+    SectionLabel("模型能力")
+    ToolCapabilityStatus(state)
 }
 
 @Composable
 private fun SkillDetail(skill: BuiltInSkill) {
-    Card(Modifier.fillMaxWidth()) {
+    SettingsGroup {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(skill.name, style = MaterialTheme.typography.titleMedium)
             Text(skill.description)
@@ -148,30 +155,33 @@ private fun MemoryModeSettings(state: SettingsUiState, model: SettingsViewModel,
     val memory = config.binding(AiCapability.MEMORY)
     val connection = config.connections.firstOrNull { it.id == memory.connectionId }
     val configured = state.agentMemoryConfigured
-    Card(Modifier.fillMaxWidth()) {
+    SectionLabel("如何整理")
+    SettingsGroup {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("自动整理候选", style = MaterialTheme.typography.titleMedium)
-                    Text("回答完成后，使用独立记忆模型整理有限对话。默认产生待审核候选。", style = MaterialTheme.typography.bodySmall)
+                    Text("回答完成后，使用独立记忆模型整理有限对话。默认产生待审核候选。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(state.agentPreferences.autoLearning, model::setAutoLearning, enabled = !state.busy && (configured || state.agentPreferences.autoLearning), modifier = Modifier.testTag("agent-auto-learning"))
             }
-            Text(if (configured) "记忆模型：${connection?.name} · ${memory.model}" else "请先配置记忆提取模型与所需密钥，普通聊天与手动记住仍可使用。", style = MaterialTheme.typography.bodySmall)
-            Text("开启会发送对话文本并产生模型费用。每天最多 20 次，每条最多 1 次；中断不会自动付费重试。关闭会停止自动整理，历史批次可在助手的检索页单独授权。", style = MaterialTheme.typography.bodySmall)
+            Text(if (configured) "记忆模型：${connection?.name} · ${memory.model}" else "请先配置记忆提取模型与所需密钥，普通聊天与手动记住仍可使用。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("开启会发送对话文本并产生模型费用。每天最多 20 次，每条最多 1 次；中断不会自动付费重试。关闭会停止自动整理，历史批次可在检索与学习中单独授权。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             TextButton(onClick = { onCapability(AiCapability.MEMORY) }, enabled = !state.busy) { Text("配置记忆模型") }
         }
     }
-    Card(Modifier.fillMaxWidth()) {
-        Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    SectionLabel("如何保存")
+    SettingsGroup {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("自动保存普通事实", style = MaterialTheme.typography.titleMedium)
-                Text("仅保存通过严格规则的完整、直接偏好或普通项目陈述。敏感信息、冲突、替代与不明确内容仍需审核。最近学习中可查看结果和纠正。", style = MaterialTheme.typography.bodySmall)
+                Text("仅保存通过严格规则的完整、直接偏好或普通项目陈述。敏感信息、冲突、替代与不明确内容仍需审核。最近学习中可查看结果和纠正。", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("默认关闭。自动保存范围较窄，其他内容会继续作为候选供你审核。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Switch(state.agentPreferences.autoConfirm, model::setAutoConfirm, enabled = !state.busy && (configured || state.agentPreferences.autoConfirm), modifier = Modifier.testTag("agent-auto-confirm"))
         }
     }
+    SectionLabel("主动回忆")
     ToolCapabilityStatus(state)
     val answer = config.binding(AiCapability.ANSWER)
     val answerConnection = config.connections.firstOrNull { it.id == answer.connectionId }

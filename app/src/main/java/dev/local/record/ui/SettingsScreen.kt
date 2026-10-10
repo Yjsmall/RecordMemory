@@ -105,7 +105,7 @@ fun SettingsHome(state: SettingsUiState, model: SettingsViewModel, onConnection:
         GroupDivider()
         SettingsRow("技能", "周回顾、项目梳理、行动规划", RecordIcons.Spark, "agent-skills", !state.busy) { model.openAgentPage(AgentSettingsPage.SKILLS) }
         GroupDivider()
-        SettingsRow("记忆方式", if (state.agentPreferences.autoLearning) "自动整理，人工审核" else "手动整理", RecordIcons.Memory, "agent-memory", !state.busy) { model.openAgentPage(AgentSettingsPage.MEMORY) }
+        SettingsRow("记忆方式", "${if (state.agentPreferences.autoLearning) "自动整理" else "手动整理"} · ${if (state.agentPreferences.autoConfirm) "普通事实自动保存" else "人工确认"}", RecordIcons.Memory, "agent-memory", !state.busy) { model.openAgentPage(AgentSettingsPage.MEMORY) }
     }
     SectionLabel("AI 服务", "${config.connections.size} 个")
     SettingsGroup {

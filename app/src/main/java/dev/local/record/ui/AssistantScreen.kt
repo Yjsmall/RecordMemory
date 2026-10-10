@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -124,7 +125,7 @@ internal fun AssistantScreen(
                             menu = false
                             history = true
                         })
-                        DropdownMenuItem(text = { Text("历史与录音检索 · 最近学习") }, modifier = Modifier.testTag("open-history-learning"), onClick = {
+                        DropdownMenuItem(text = { Text("检索与学习") }, leadingIcon = { Icon(RecordIcons.Search, null) }, modifier = Modifier.testTag("open-history-learning"), onClick = {
                             menu = false
                             onHistorySearch()
                         })
@@ -140,7 +141,7 @@ internal fun AssistantScreen(
                             menu = false
                             onConfigureMemory()
                         })
-                        DropdownMenuItem(text = { Text("删除当前对话") }, enabled = state.conversationId != null && !state.busy, onClick = {
+                        DropdownMenuItem(text = { Text("删除当前对话", color = MaterialTheme.colorScheme.error) }, enabled = state.conversationId != null && !state.busy, onClick = {
                             menu = false
                             deleting = true
                         })
@@ -154,19 +155,19 @@ internal fun AssistantScreen(
                     TextButton(onClick = onStop, enabled = session.phase != dev.local.record.audio.SessionPhase.SAVING) { Text("停止保存") }
                 }
             }
-            if (state.configured && !state.activeRecallAvailable && !compact) {
-                Text("主动回忆未启用，可在设置 → 助手 → 记忆方式中测试模型工具能力", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp))
-            }
             LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth().testTag("assistant-messages"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {
                 if (turns.isEmpty()) {
                     item {
                         Column(Modifier.fillMaxWidth().padding(vertical = if (compact) 8.dp else 48.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                             IconBadge(RecordIcons.Spark, size = 64)
-                            Text("慢慢认识你", style = MaterialTheme.typography.headlineMedium)
-                            Text("偏好、计划，还有今天的想法", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("今天想聊些什么？", style = MaterialTheme.typography.headlineMedium)
+                            Text("梳理想法、回顾近况，或一起安排下一步", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             if (state.configured) {
-                                TextButton(onClick = { onDraft("我想先和你聊聊我自己") }) { Text("聊聊我自己") }
-                                TextButton(onClick = { onDraft("你目前对我有哪些了解？") }) { Text("你对我有哪些了解？") }
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    FilledTonalButton(onClick = { onDraft("我想先和你聊聊我自己") }) { Text("聊聊我自己") }
+                                    FilledTonalButton(onClick = { onDraft("你目前对我有哪些了解？") }) { Text("回顾我的记忆") }
+                                }
+                                if (!state.activeRecallAvailable && !compact) Text("主动回忆未启用，可在设置 → 助手 → 记忆方式中检查", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                             } else {
                                 Button(onClick = onConfigure, modifier = Modifier.testTag("configure-assistant")) { Text("选择对话模型") }
                             }
@@ -194,12 +195,15 @@ internal fun AssistantScreen(
                                 state.memories.filter { it.sourceTurnId == turn.id && it.visible }.forEach { memory ->
                                     Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth()) {
                                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text("${memory.changeLabel()} · ${memory.type.label}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                Text("${memory.changeLabel()} · ${memory.type.label}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 5.dp))
+                                                StatusPill(if (memory.status == MemoryStatus.CANDIDATE) "待确认" else "已确认", emphasized = memory.status == MemoryStatus.CANDIDATE)
+                                            }
                                             Text(memory.text, style = MaterialTheme.typography.bodyMedium)
                                             MemoryKnowledgeDetails(memory, state.memories)
                                             if (memory.evidence.isNotBlank()) Text("依据：${memory.evidence}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                             if (memory.status == MemoryStatus.CANDIDATE) {
-                                                Row(Modifier.align(Alignment.End)) {
+                                                FlowRow(Modifier.align(Alignment.End), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                                     TextButton(onClick = { onForget(memory.id) }) { Text("忽略") }
                                                     if (memory.confirmable()) {
                                                         FilledTonalButton(onClick = { onConfirm(memory.id) }, modifier = Modifier.testTag("assistant-confirm-${memory.id}")) { Text(if (memory.change?.targetId != null) "确认${memory.changeLabel()}" else "确认记忆") }
@@ -222,17 +226,19 @@ internal fun AssistantScreen(
                 }
             }
             state.problem?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 20.dp)) }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedTextField(
-                    state.draft,
-                    onDraft,
-                    modifier = Modifier.weight(1f).heightIn(max = if (compact) 88.dp else 144.dp).testTag("assistant-input"),
-                    placeholder = { Text("想聊些什么？") },
-                    shape = RoundedCornerShape(24.dp),
-                    maxLines = if (compact) 2 else 4,
-                    colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest, focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest, unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant)
-                )
-                FilledIconButton(onClick = onSend, enabled = state.ready && state.configured && !state.busy && state.activeTurn == null && state.draft.isNotBlank(), modifier = Modifier.size(52.dp).testTag("assistant-send")) { Icon(RecordIcons.Send, "发送") }
+            Surface(color = MaterialTheme.colorScheme.surface) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        state.draft,
+                        onDraft,
+                        modifier = Modifier.weight(1f).heightIn(max = if (compact) 88.dp else 144.dp).testTag("assistant-input"),
+                        placeholder = { Text("想聊些什么？") },
+                        shape = RoundedCornerShape(24.dp),
+                        maxLines = if (compact) 2 else 4,
+                        colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest, focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerLowest, unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant)
+                    )
+                    FilledIconButton(onClick = onSend, enabled = state.ready && state.configured && !state.busy && state.activeTurn == null && state.draft.isNotBlank(), modifier = Modifier.size(52.dp).testTag("assistant-send")) { Icon(RecordIcons.Send, "发送") }
+                }
             }
             if (!compact) {
                 Text(
@@ -311,6 +317,7 @@ internal fun AssistantScreen(
 
 @Composable
 private fun MemoryPlanningActions(task: MemoryPlanningTask?, enabled: Boolean, configured: Boolean, onPlan: () -> Unit, onCancel: () -> Unit, onConfigure: () -> Unit, turnId: String) {
+    if (task == null && !configured) return
     val running = task?.status in setOf(MemoryPlanningStatus.REQUESTED, MemoryPlanningStatus.RUNNING)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         task?.let { Text(memoryPlanningLabel(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -318,7 +325,10 @@ private fun MemoryPlanningActions(task: MemoryPlanningTask?, enabled: Boolean, c
             running -> TextButton(onClick = onCancel, enabled = enabled) { Text("停止整理") }
             task?.status == MemoryPlanningStatus.COMPLETED -> Unit
             configured -> TextButton(onClick = onPlan, enabled = enabled, modifier = Modifier.testTag("plan-memory-$turnId")) { Text(if (task == null) "整理记忆" else "重新整理记忆") }
-            else -> TextButton(onClick = onConfigure, enabled = enabled) { Text("配置记忆模型以整理 · 手动记住仍可用") }
+            else -> {
+                TextButton(onClick = onConfigure, enabled = enabled) { Text("配置记忆模型") }
+                Text("也可以在消息中手动记住", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }

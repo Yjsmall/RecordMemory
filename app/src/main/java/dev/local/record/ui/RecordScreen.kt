@@ -3,6 +3,7 @@ package dev.local.record.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -53,6 +54,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -158,194 +160,199 @@ fun RecordScreen(
             dismissButton = { TextButton(onClick = { deleteId = null }) { Text("取消") } }
         )
     }
-    val windowInfo = currentWindowAdaptiveInfo()
-    val directive = calculatePaneScaffoldDirective(windowInfo)
-    val wide = directive.maxHorizontalPartitions > 1
-    val strategy = rememberListDetailSceneStrategy<NavKey>(directive = directive)
-    val snackbar = remember { SnackbarHostState() }
-    LaunchedEffect(problem) { problem?.let { snackbar.showSnackbar(it) } }
-    Scaffold(contentWindowInsets = WindowInsets.safeDrawing, snackbarHost = { SnackbarHost(snackbar) }) { insets ->
-        NavDisplay(
-            backStack = backStack,
-            modifier = Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets),
-            onBack = { if (backStack.size > 1) backStack.removeLastOrNull() },
-            sceneStrategy = strategy,
-            entryProvider = entryProvider {
-                entry<Library>(
-                    metadata = ListDetailSceneStrategy.listPane(detailPlaceholder = {
-                        Box(Modifier.fillMaxSize().testTag("detail-placeholder"), contentAlignment = Alignment.Center) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
-                                IconBadge(RecordIcons.Wave, size = 80)
-                                Text("选择录音", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val windowInfo = currentWindowAdaptiveInfo()
+        val windowDirective = calculatePaneScaffoldDirective(windowInfo)
+        // A hosting region can be narrower than its Activity window (including large-font layouts).
+        val canFitTwoPanes = maxWidth >= maxOf(840.dp, 720.dp * LocalDensity.current.fontScale)
+        val directive = windowDirective.copy(maxHorizontalPartitions = minOf(windowDirective.maxHorizontalPartitions, if (canFitTwoPanes) 2 else 1))
+        val wide = directive.maxHorizontalPartitions > 1
+        val strategy = rememberListDetailSceneStrategy<NavKey>(directive = directive)
+        val snackbar = remember { SnackbarHostState() }
+        LaunchedEffect(problem) { problem?.let { snackbar.showSnackbar(it) } }
+        Scaffold(contentWindowInsets = WindowInsets.safeDrawing, snackbarHost = { SnackbarHost(snackbar) }) { insets ->
+            NavDisplay(
+                backStack = backStack,
+                modifier = Modifier.fillMaxSize().padding(insets).consumeWindowInsets(insets),
+                onBack = { if (backStack.size > 1) backStack.removeLastOrNull() },
+                sceneStrategy = strategy,
+                entryProvider = entryProvider {
+                    entry<Library>(
+                        metadata = ListDetailSceneStrategy.listPane(detailPlaceholder = {
+                            Box(Modifier.fillMaxSize().testTag("detail-placeholder"), contentAlignment = Alignment.Center) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                                    IconBadge(RecordIcons.Wave, size = 80)
+                                    Text("选择录音", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
-                        }
-                    })
-                ) {
-                    LibraryPane(
-                        recordings, insights, session, ready, problem, notificationsAllowed,
-                        onStart, onPause, onStop, onNotifications,
-                        selectedId = backStack.filterIsInstance<Detail>().lastOrNull()?.id,
-                        onDelete = { deleteId = it.id },
-                        onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
-                        onMemories = { backStack.add(MemoriesPage) },
-                        onAssistant = { backStack.add(AssistantPage()) },
-                        onSearch = { backStack.add(HistoryLearningPage) },
-                        onSelect = { id ->
-                            while (backStack.size > 1) backStack.removeLastOrNull()
-                            backStack.add(Detail(id))
-                        }
-                    )
-                }
-                entry<Detail>(metadata = ListDetailSceneStrategy.detailPane()) { detail ->
-                    DetailPane(
-                        recordings.firstOrNull { it.id == detail.id },
-                        insights.firstOrNull { it.recordingId == detail.id },
-                        jobs.filter { it.recordingId == detail.id },
-                        memories,
-                        session,
-                        playback,
-                        showBack = !wide,
-                        onBack = { if (backStack.size > 1) backStack.removeLastOrNull() },
-                        onPlay = onPlay,
-                        onSeek = onSeek,
-                        onStop = onStop,
-                        onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
-                        onTranscribe = onTranscribe,
-                        onGenerate = onGenerate,
-                        onSaveTranscript = onSaveTranscript,
-                        onSaveTitle = onSaveTitle,
-                        onSaveSummary = onSaveSummary,
-                        onAcceptTitle = onAcceptTitle,
-                        onAcceptSummary = onAcceptSummary,
-                        onConfirmMemory = onConfirmMemory,
-                        onForgetMemory = onForgetMemory,
-                        onDisableMemory = onDisableMemory,
-                        onCorrectMemory = onCorrectMemory,
-                        onMergeMemory = onMergeMemory
-                    )
-                }
-                entry<MemoriesPage> {
-                    Column(Modifier.fillMaxSize()) {
-                        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { if (backStack.size > 1) backStack.removeLastOrNull() }) { Icon(RecordIcons.Back, "返回录音库") }
-                            Text("记忆", style = MaterialTheme.typography.titleLarge)
-                        }
-                        MemoryLibrary(memories, onConfirmMemory, onForgetMemory, onDisableMemory, onCorrectMemory, onMergeMemory, onOpenSource = { id ->
-                            if (id.startsWith("chat:")) {
-                                backStack.add(AssistantPage(id.removePrefix("chat:")))
-                            } else if (recordings.any { it.id == id }) {
+                        })
+                    ) {
+                        LibraryPane(
+                            recordings, insights, session, ready, problem, notificationsAllowed,
+                            onStart, onPause, onStop, onNotifications,
+                            selectedId = backStack.filterIsInstance<Detail>().lastOrNull()?.id,
+                            onDelete = { deleteId = it.id },
+                            onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
+                            onMemories = { backStack.add(MemoriesPage) },
+                            onAssistant = { backStack.add(AssistantPage()) },
+                            onSearch = { backStack.add(HistoryLearningPage) },
+                            onSelect = { id ->
                                 while (backStack.size > 1) backStack.removeLastOrNull()
                                 backStack.add(Detail(id))
                             }
-                        }, onAllowRelearning = onAllowMemoryRelearning)
-                    }
-                }
-                entry<AssistantPage> { page ->
-                    val model = assistantModel
-                    if (model != null) {
-                        val assistantState by model.state.collectAsStateWithLifecycle()
-                        LaunchedEffect(page.conversationId) { page.conversationId?.takeIf { it != model.state.value.conversationId }?.let(model::select) }
-                        AssistantScreen(
-                            assistantState, session, { backStack.removeLastOrNull() }, model::draft, model::send, model::retry, model::cancel,
-                            model::newConversation, model::select, model::deleteConversation, model::remember, onConfirmMemory, onForgetMemory,
-                            { backStack.add(MemoriesPage) }, {
-                                settingsModel?.editBinding(AiCapability.ANSWER)
-                                backStack.add(CapabilityPage(AiCapability.ANSWER))
-                            }, onPause, onStop, model::planMemory, model::cancelMemoryPlanning, {
-                                settingsModel?.editBinding(AiCapability.MEMORY)
-                                backStack.add(CapabilityPage(AiCapability.MEMORY))
-                            }, onHistorySearch = { backStack.add(HistoryLearningPage) }
                         )
                     }
-                }
-                entry<HistoryLearningPage> {
-                    assistantModel?.let { model ->
-                        val historyState by model.state.collectAsStateWithLifecycle()
-                        HistoryLearningScreen(
-                            historyState,
-                            onBack = { backStack.removeLastOrNull() },
-                            onQuery = model::updateHistory,
-                            onSearch = model::searchHistory,
-                            onSelect = model::selectHistory,
-                            onPlan = model::planHistory,
-                            onOpenSource = { contentId ->
-                                model.openHistorySource(contentId, { conversationId ->
-                                    backStack.add(AssistantPage(conversationId))
-                                }, { recordingId ->
-                                    backStack.add(Detail(recordingId))
-                                })
-                            },
-                            onMemories = { backStack.add(MemoriesPage) },
-                            onCancelTask = model::cancelMemoryPlanning
+                    entry<Detail>(metadata = ListDetailSceneStrategy.detailPane()) { detail ->
+                        DetailPane(
+                            recordings.firstOrNull { it.id == detail.id },
+                            insights.firstOrNull { it.recordingId == detail.id },
+                            jobs.filter { it.recordingId == detail.id },
+                            memories,
+                            session,
+                            playback,
+                            showBack = !wide,
+                            onBack = { if (backStack.size > 1) backStack.removeLastOrNull() },
+                            onPlay = onPlay,
+                            onSeek = onSeek,
+                            onStop = onStop,
+                            onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
+                            onTranscribe = onTranscribe,
+                            onGenerate = onGenerate,
+                            onSaveTranscript = onSaveTranscript,
+                            onSaveTitle = onSaveTitle,
+                            onSaveSummary = onSaveSummary,
+                            onAcceptTitle = onAcceptTitle,
+                            onAcceptSummary = onAcceptSummary,
+                            onConfirmMemory = onConfirmMemory,
+                            onForgetMemory = onForgetMemory,
+                            onDisableMemory = onDisableMemory,
+                            onCorrectMemory = onCorrectMemory,
+                            onMergeMemory = onMergeMemory
                         )
                     }
-                }
-                entry<SettingsPage> {
-                    settingsModel?.let { model ->
-                        SettingsFrame(settingsState.agentPage?.label ?: "设置", settingsState, session, settingsState.soulDirty, {
-                            if (settingsState.agentPage != null) model.closeAgentPage() else backStack.removeLastOrNull()
-                        }, if (settingsState.soulDirty) ({ model.saveSoul() }) else null, onPause, onStop) {
-                            SettingsHome(
-                                settingsState,
-                                model,
-                                onConnection = { id ->
-                                    model.editConnection(id)
-                                    backStack.add(ConnectionPage(id))
-                                },
-                                onCapability = { capability ->
-                                    model.editBinding(capability)
-                                    backStack.add(CapabilityPage(capability))
+                    entry<MemoriesPage> {
+                        Column(Modifier.fillMaxSize()) {
+                            Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { if (backStack.size > 1) backStack.removeLastOrNull() }) { Icon(RecordIcons.Back, "返回录音库") }
+                                Text("记忆", style = MaterialTheme.typography.titleLarge)
+                            }
+                            MemoryLibrary(memories, onConfirmMemory, onForgetMemory, onDisableMemory, onCorrectMemory, onMergeMemory, onOpenSource = { id ->
+                                if (id.startsWith("chat:")) {
+                                    backStack.add(AssistantPage(id.removePrefix("chat:")))
+                                } else if (recordings.any { it.id == id }) {
+                                    while (backStack.size > 1) backStack.removeLastOrNull()
+                                    backStack.add(Detail(id))
                                 }
+                            }, onAllowRelearning = onAllowMemoryRelearning)
+                        }
+                    }
+                    entry<AssistantPage> { page ->
+                        val model = assistantModel
+                        if (model != null) {
+                            val assistantState by model.state.collectAsStateWithLifecycle()
+                            LaunchedEffect(page.conversationId) { page.conversationId?.takeIf { it != model.state.value.conversationId }?.let(model::select) }
+                            AssistantScreen(
+                                assistantState, session, { backStack.removeLastOrNull() }, model::draft, model::send, model::retry, model::cancel,
+                                model::newConversation, model::select, model::deleteConversation, model::remember, onConfirmMemory, onForgetMemory,
+                                { backStack.add(MemoriesPage) }, {
+                                    settingsModel?.editBinding(AiCapability.ANSWER)
+                                    backStack.add(CapabilityPage(AiCapability.ANSWER))
+                                }, onPause, onStop, model::planMemory, model::cancelMemoryPlanning, {
+                                    settingsModel?.editBinding(AiCapability.MEMORY)
+                                    backStack.add(CapabilityPage(AiCapability.MEMORY))
+                                }, onHistorySearch = { backStack.add(HistoryLearningPage) }
                             )
                         }
                     }
-                }
-                entry<ConnectionPage> { page ->
-                    settingsModel?.let { model ->
-                        LaunchedEffect(page, settingsState.configuration != null) {
-                            if (settingsState.configuration != null && settingsState.connectionDraft == null) model.editConnection(page.id)
+                    entry<HistoryLearningPage> {
+                        assistantModel?.let { model ->
+                            val historyState by model.state.collectAsStateWithLifecycle()
+                            HistoryLearningScreen(
+                                historyState,
+                                onBack = { backStack.removeLastOrNull() },
+                                onQuery = model::updateHistory,
+                                onSearch = model::searchHistory,
+                                onSelect = model::selectHistory,
+                                onPlan = model::planHistory,
+                                onOpenSource = { contentId ->
+                                    model.openHistorySource(contentId, { conversationId ->
+                                        backStack.add(AssistantPage(conversationId))
+                                    }, { recordingId ->
+                                        backStack.add(Detail(recordingId))
+                                    })
+                                },
+                                onMemories = { backStack.add(MemoriesPage) },
+                                onCancelTask = model::cancelMemoryPlanning
+                            )
                         }
-                        val back = {
-                            model.discardDraft()
-                            backStack.removeLastOrNull()
-                            Unit
+                    }
+                    entry<SettingsPage> {
+                        settingsModel?.let { model ->
+                            SettingsFrame(settingsState.agentPage?.label ?: "设置", settingsState, session, settingsState.soulDirty, {
+                                if (settingsState.agentPage != null) model.closeAgentPage() else backStack.removeLastOrNull()
+                            }, if (settingsState.soulDirty) ({ model.saveSoul() }) else null, onPause, onStop) {
+                                SettingsHome(
+                                    settingsState,
+                                    model,
+                                    onConnection = { id ->
+                                        model.editConnection(id)
+                                        backStack.add(ConnectionPage(id))
+                                    },
+                                    onCapability = { capability ->
+                                        model.editBinding(capability)
+                                        backStack.add(CapabilityPage(capability))
+                                    }
+                                )
+                            }
                         }
-                        SettingsFrame(
-                            if (page.id == null) "添加服务" else "编辑服务",
-                            settingsState,
-                            session,
-                            settingsState.connectionDraft?.dirty == true,
-                            back,
-                            { model.saveConnection { backStack.removeLastOrNull() } },
-                            onPause,
-                            onStop
-                        ) { ConnectionEditor(settingsState, model) { backStack.removeLastOrNull() } }
+                    }
+                    entry<ConnectionPage> { page ->
+                        settingsModel?.let { model ->
+                            LaunchedEffect(page, settingsState.configuration != null) {
+                                if (settingsState.configuration != null && settingsState.connectionDraft == null) model.editConnection(page.id)
+                            }
+                            val back = {
+                                model.discardDraft()
+                                backStack.removeLastOrNull()
+                                Unit
+                            }
+                            SettingsFrame(
+                                if (page.id == null) "添加服务" else "编辑服务",
+                                settingsState,
+                                session,
+                                settingsState.connectionDraft?.dirty == true,
+                                back,
+                                { model.saveConnection { backStack.removeLastOrNull() } },
+                                onPause,
+                                onStop
+                            ) { ConnectionEditor(settingsState, model) { backStack.removeLastOrNull() } }
+                        }
+                    }
+                    entry<CapabilityPage> { page ->
+                        settingsModel?.let { model ->
+                            LaunchedEffect(page, settingsState.configuration != null) {
+                                if (settingsState.configuration != null && settingsState.bindingDraft == null) model.editBinding(page.capability)
+                            }
+                            val back = {
+                                model.discardDraft()
+                                backStack.removeLastOrNull()
+                                Unit
+                            }
+                            SettingsFrame(
+                                page.capability.label,
+                                settingsState,
+                                session,
+                                settingsState.bindingDirty,
+                                back,
+                                { model.saveBinding { backStack.removeLastOrNull() } },
+                                onPause,
+                                onStop
+                            ) { CapabilityEditor(settingsState, model) }
+                        }
                     }
                 }
-                entry<CapabilityPage> { page ->
-                    settingsModel?.let { model ->
-                        LaunchedEffect(page, settingsState.configuration != null) {
-                            if (settingsState.configuration != null && settingsState.bindingDraft == null) model.editBinding(page.capability)
-                        }
-                        val back = {
-                            model.discardDraft()
-                            backStack.removeLastOrNull()
-                            Unit
-                        }
-                        SettingsFrame(
-                            page.capability.label,
-                            settingsState,
-                            session,
-                            settingsState.bindingDirty,
-                            back,
-                            { model.saveBinding { backStack.removeLastOrNull() } },
-                            onPause,
-                            onStop
-                        ) { CapabilityEditor(settingsState, model) }
-                    }
-                }
-            }
-        )
+            )
+        }
     }
 }
 
@@ -391,17 +398,18 @@ private fun LibraryPane(
         }
         item { RecordingControls(session, ready, onStart, onPause, onStop) }
         item {
-            TextButton(onClick = onSearch, modifier = Modifier.testTag("library-history-search")) { Text("搜索聊天与录音原文 · 最近学习") }
-        }
-        item {
-            Surface(onClick = onAssistant, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest, modifier = Modifier.fillMaxWidth().testTag("open-assistant")) {
-                Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    IconBadge(RecordIcons.Chat)
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("私人助手", style = MaterialTheme.typography.titleMedium)
-                        Text("聊聊想法，继续了解你", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
+                val entries: @Composable () -> Unit = {
+                    FeatureEntry("私人助手", "聊想法，梳理计划", RecordIcons.Chat, onAssistant, Modifier.testTag("open-assistant"))
+                    FeatureEntry("检索与学习", "查找原文，查看记忆变更", RecordIcons.Search, onSearch, Modifier.testTag("library-history-search"))
+                }
+                if (maxWidth >= 560.dp && LocalDensity.current.fontScale <= 1.3f) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Column(Modifier.weight(1f)) { FeatureEntry("私人助手", "聊想法，梳理计划", RecordIcons.Chat, onAssistant, Modifier.testTag("open-assistant")) }
+                        Column(Modifier.weight(1f)) { FeatureEntry("检索与学习", "查找原文，查看记忆变更", RecordIcons.Search, onSearch, Modifier.testTag("library-history-search")) }
                     }
-                    Icon(RecordIcons.Next, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { entries() }
                 }
             }
         }
@@ -452,7 +460,7 @@ fun RecordingControls(session: SessionState, ready: Boolean, onStart: () -> Unit
                 Text(if (session.active) sessionLabel(session.phase) else "新录音", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                 Text("M4A", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Text(formatDuration(if (session.active) session.durationMs else 0), style = MaterialTheme.typography.displayMedium, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Light, modifier = Modifier.padding(top = 8.dp).then(if (session.active) Modifier.testTag("live-duration") else Modifier))
+            Text(formatDuration(if (session.active) session.durationMs else 0), style = MaterialTheme.typography.displaySmall, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Light, modifier = Modifier.padding(top = 8.dp).then(if (session.active) Modifier.testTag("live-duration") else Modifier))
             if (session.active) {
                 LevelMeter(session.level, session.phase == SessionPhase.RECORDING)
                 if (session.silenced) {
