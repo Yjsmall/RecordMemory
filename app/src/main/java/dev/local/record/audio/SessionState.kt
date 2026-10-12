@@ -1,6 +1,6 @@
 package dev.local.record.audio
 
-enum class SessionPhase { IDLE, STARTING, RECORDING, PAUSED, SAVING, ERROR }
+enum class SessionPhase { IDLE, STARTING, RECORDING, PAUSED, SAVING, DISCARDING, ERROR }
 
 /** Live state, never inferred from historical RecordingStarted events. */
 data class SessionState(
@@ -11,5 +11,5 @@ data class SessionState(
     val silenced: Boolean = false,
     val message: String? = null
 ) {
-    val active: Boolean get() = phase in setOf(SessionPhase.STARTING, SessionPhase.RECORDING, SessionPhase.PAUSED, SessionPhase.SAVING)
+    val active: Boolean get() = phase in setOf(SessionPhase.STARTING, SessionPhase.RECORDING, SessionPhase.PAUSED, SessionPhase.SAVING, SessionPhase.DISCARDING)
 }

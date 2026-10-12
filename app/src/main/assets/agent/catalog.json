@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "soulHash": "f0afe3e38aa75581beaa3b82f65c15728681901ff24ee87f12cbfcfc47e1267a",
+  "soulHash": "960c374223dfb84c8d4e8e315c043b563924e2f6f8e4eee866992a8e7c36d052",
   "conventionsHash": "24b6d87bb367c4ba4abb7c7e361f25a7aa5b28bb629663172c845562f6ea02da",
   "skills": [
     {
@@ -9,10 +9,10 @@
       "description": "整理近期进展与下周重点。用户要求周回顾、复盘或回顾近期进展时使用。",
       "version": "1.0.0",
       "path": "skills/weekly-review/SKILL.md",
-      "bundleHash": "027b8ac6fb172409e7c7f80496851e2cb6accbe3c6843142d960dabbc908da97",
+      "bundleHash": "53e94c33d06a5899814488341aca0594bd6e9539ef54b20862c3f71c70ccfc2e",
       "files": {
         "references/review-outline.md": "db3a27021cd1e81094bc3f7ca5a23c24a2226e4c2727f1f9893f23ec9020c0b2",
-        "SKILL.md": "9c5037676919cdbca1fedf2d1c3e375dd5f8ed3f3b1bdd7080027e3fbf2e392f"
+        "SKILL.md": "6642c83f8299c8c41a1e17e606197775a97f5f9c788b0c0b4d16e11a9ac9de1d"
       },
       "requiredTools": [
         "get_personal_profile",
@@ -29,9 +29,9 @@
       "description": "梳理项目目标、进度与阻碍。用户要求项目复盘、状态梳理或核对下一步时使用。",
       "version": "1.0.0",
       "path": "skills/project-review/SKILL.md",
-      "bundleHash": "e72348b0996caa57473ab8bd5f3e289d7726c6d93cdb0b41947b5f402f4f0743",
+      "bundleHash": "15a8ad8a185732f1631ec197d30330c49725713e7fdb8970b7b38a5dc17786d4",
       "files": {
-        "SKILL.md": "17b970aa252c20cdb7973027fe5df2cee82ad24e1436941e427efbdbeba429b1"
+        "SKILL.md": "6b717d18820ef1589583a02f160b31d97ae35439bd88ea4ec063e39b551435e3"
       },
       "requiredTools": [
         "get_personal_profile",
@@ -47,9 +47,9 @@
       "description": "将目标拆成可执行的下一步。用户要求行动规划、安排重点或制定个人计划时使用。",
       "version": "1.0.0",
       "path": "skills/personal-planning/SKILL.md",
-      "bundleHash": "c17a1cb7411cc4fc487affcf8dd8741d9267328696f9477a9dff564071937614",
+      "bundleHash": "749b99afb6641c1a2ae65efc19febb1819d936d9d4453876f86f7364a2213c0d",
       "files": {
-        "SKILL.md": "ee8d39bb3b3d45666869025133a9d3d7b924826d944481daf2c0d0bbcd837ed5"
+        "SKILL.md": "03fb140980be15e892fc879bf9599011702c36d6aab71548f4a7afc618f9227c"
       },
       "requiredTools": [
         "get_personal_profile",

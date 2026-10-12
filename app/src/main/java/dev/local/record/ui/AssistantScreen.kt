@@ -152,7 +152,7 @@ internal fun AssistantScreen(
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("${sessionLabel(session.phase)} · ${formatDuration(session.durationMs)}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
                     TextButton(onClick = onPause) { Text(if (session.phase == dev.local.record.audio.SessionPhase.PAUSED) "继续" else "暂停") }
-                    TextButton(onClick = onStop, enabled = session.phase != dev.local.record.audio.SessionPhase.SAVING) { Text("停止保存") }
+                    TextButton(onClick = onStop, enabled = session.phase !in setOf(dev.local.record.audio.SessionPhase.SAVING, dev.local.record.audio.SessionPhase.DISCARDING)) { Text("停止保存") }
                 }
             }
             LazyColumn(state = list, modifier = Modifier.weight(1f).fillMaxWidth().testTag("assistant-messages"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(28.dp)) {

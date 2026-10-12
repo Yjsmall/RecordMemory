@@ -1,7 +1,7 @@
 ---
 name: weekly-review
 description: 整理近期进展与下周重点。用户要求周回顾、复盘或回顾近期进展时使用。
-compatibility: 随声记原生本机查询工具，不依赖脚本或网络搜索。
+compatibility: 知伴原生本机查询工具，不依赖脚本或网络搜索。
 metadata:
   author: record-project
   version: "1.0.0"

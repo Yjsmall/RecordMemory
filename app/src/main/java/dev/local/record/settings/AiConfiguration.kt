@@ -139,7 +139,7 @@ object ConfigurationCodec {
         val configuration = try {
             json.decodeFromString<AiConfiguration>(source)
         } catch (_: SerializationException) {
-            throw IllegalArgumentException("配置 JSON 格式不兼容，请使用随声记导出的无密钥配置")
+            throw IllegalArgumentException("配置 JSON 格式不兼容，请使用知伴导出的无密钥配置")
         }
         return configuration.also(::validateConfiguration)
     }

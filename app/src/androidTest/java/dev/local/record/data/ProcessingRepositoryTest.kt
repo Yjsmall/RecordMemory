@@ -64,7 +64,7 @@ class ProcessingRepositoryTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val info = context.packageManager.getReceiverInfo(ComponentName(context, RecordingWidget::class.java), PackageManager.GET_META_DATA)
         assertTrue(info.enabled)
-        assertEquals("随声记", info.loadLabel(context.packageManager).toString())
+        assertEquals("知伴", info.loadLabel(context.packageManager).toString())
     }
 
     @Test

@@ -1,8 +1,10 @@
-# 随声记
+# 知伴
 
-纯原生 Android 本地录音原型：Kotlin、Jetpack Compose、Material 3 Expressive、Room Event Sourcing。
+定位为理解与陪伴用户的私人助手，以录音、对话和有来源的记忆帮助用户梳理生活。纯原生 Android：Kotlin、Jetpack Compose、Material 3 Expressive、Room Event Sourcing。应用原名「随声记」，覆盖升级沿用现有数据。
 
-支持桌面小组件自动开始、麦克风前台服务、暂停／继续、M4A 保存、按日期分组的录音库、播放和进度拖动。按实际窗口与折叠特征展示单栏／列表详情双栏；Activity 重建不会结束服务录音。
+支持桌面小组件自动开始、麦克风前台服务、暂停／继续、录制中直接删除本次录音、M4A 保存、按日期分组的录音库、播放和进度拖动。录音页与详情页的「删除本次录音」会结束采集并清理音频，不保存或触发 AI 处理。按实际窗口与折叠特征展示单栏／列表详情双栏；Activity 重建不会结束服务录音。
+
+2026-10-12 已移除「录音通知」设置、原子岛、胶囊测试、诊断及 Live Updates 提升请求。后台录音保留 Android 必需的普通前台服务通知及暂停／继续、停止保存操作；应用启动会清理旧原子卡片、测试通知和测试渠道。下述原子通知版本记录及相关文档为历史资料。
 
 0.4.3 增加结构化主体、事实范围、日期与多来源；记忆整理可提出新增、补充依据、替代旧事实和澄清问题，全部经审核提交。忘记结构化事实会阻止同范围的新候选，并提供明确的重新学习入口。删除部分来源保留仍有有效证据的事实，过期事实退出当前画像。详见 [结构化记忆交付](docs/structured-memory-delivery.md)。私人助手使用独立的「记忆提取」模型；聊天不顺带保存记忆，未配置记忆模型仍可聊天和手动记住。历史版本见 [记忆系统第一版](docs/memory-system-delivery.md)、[复审与加固](docs/memory-system-review.md) 和 [私人助手交付](docs/personal-assistant-delivery.md)。
 
@@ -20,6 +22,8 @@
 
 0.4.7 补齐 Android 标准 Live Updates 提升请求与权限，录音用系统计时器、暂停用冻结的短计时文本；诊断区分请求、格式资格、系统允许与实际提升。vivo 是否将该通知显示为原子岛仍待真机验证。[网页检索与开发路径](docs/island-development-research.md) 比较原生原子岛、标准 Live Updates 与悬浮窗方案。
 
+0.4.8 增加设置中的本地胶囊测试，可选择示例场景并执行创建、更新、结束归档和清除。使用系统通知 API，不接入云推送 SDK；仅发送合成通知。模拟器五项专项通过；vivo 真机仍未显示胶囊，更新收据检查未通过。实际范围与结果见 [本地原子通知测试版](docs/local-atomic-notification-delivery.md)。
+
 ## 构建
 
 需要 JDK 21（编译目标 Java 17）、Android SDK Platform 36、Build Tools 36.0.0。`local.properties` 设置 `sdk.dir`，不纳入版本控制。
@@ -32,7 +36,7 @@
 
 APK：`app/build/outputs/apk/debug/app-debug.apk`。
 
-当前 `applicationId` 为 `dev.local.record`，显示名称「随声记」，最低 Android 10（API 29）。此包使用本机标准 debug key；正式长期使用前应固定发布签名并规划迁移。本阶段不自动备份个人录音。
+当前 `applicationId` 为 `dev.local.record`，显示名称「知伴」，最低 Android 10（API 29）。此包使用本机标准 debug key；正式长期使用前应固定发布签名并规划迁移。本阶段不自动备份个人录音。
 
 ## 固定工具链
 
@@ -56,7 +60,7 @@ Windows 若仅系统代理可用，Java 不一定自动采用该设置。按本�
 
 ## 代码管理
 
-仓库采用 jj Git 后端与 colocated 工作区。`jj status`、`jj diff`、`jj log` 查看状态；`jj new` 开始下一项变更。远端尚未配置。
+仓库采用 jj Git 后端与 colocated 工作区。`jj status`、`jj diff`、`jj log` 查看状态；`jj new` 开始下一项变更。远端 `origin` 为 [Yjsmall/RecordMemory](https://github.com/Yjsmall/RecordMemory)，使用 jj 推送 `main`。
 
 事件追加、唯一幂等键、聚合版本检查、投影及检查点更新在同一 Room 事务内完成。`RecordingRepository.rebuild()` 仅重建投影；纯 reducer 不持有麦克风、网络、文件或调度接口。音频放在私有文件目录，事件只引用文件名。
 

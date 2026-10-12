@@ -18,7 +18,6 @@ import dev.local.record.AppGraph
 import dev.local.record.MainActivity
 import dev.local.record.R
 import dev.local.record.domain.RecordingEvent
-import dev.local.record.domain.RecordingStatus
 import dev.local.record.widget.RecordingWidget
 import java.io.File
 import java.time.ZoneId
@@ -44,7 +43,6 @@ class RecordingService : Service() {
     private var engine: CaptureEngine? = null
     private var capture: Job? = null
     private var lastRefresh = 0L
-    private var islandRevision = 0
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -56,7 +54,6 @@ class RecordingService : Service() {
                 setShowBadge(false)
             }
         )
-        NotificationDiagnostics.record(this, "scene", AtomicIsland.sceneStatus(this))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -163,27 +160,30 @@ class RecordingService : Service() {
 
     private suspend fun discardRecording() {
         val id = graph.session.value.recordingId
-        graph.session.value = graph.session.value.copy(phase = SessionPhase.SAVING, level = 0f)
-        engine?.stop()
-        capture?.join()
-        engine = null
-        capture = null
-        if (id != null) {
-            val current = graph.repository.get(id)
-            if (current != null && current.status in setOf(RecordingStatus.REQUESTED, RecordingStatus.RECORDING, RecordingStatus.PAUSED)) {
-                val failed = graph.repository.append(id, current.version, "$id:discard", RecordingEvent.Failed("已放弃"), System.currentTimeMillis())
-                graph.repository.append(id, failed.version, "$id:discard-delete", RecordingEvent.Deleted, System.currentTimeMillis())
-            }
-            deletePrivateAudio(id)
+        if (id == null || engine == null) {
+            shutdown()
+            return
         }
-        graph.session.value = SessionState(message = "已放弃这次录音")
-        shutdown()
-    }
-
-    private fun deletePrivateAudio(id: String) {
-        listOf("$id.m4a.part", "$id.m4a").forEach { name ->
-            val file = File(graph.audioDirectory, name)
-            if (file.exists() && file.canonicalFile.parentFile == graph.audioDirectory.canonicalFile) file.delete()
+        graph.session.value = graph.session.value.copy(phase = SessionPhase.DISCARDING, level = 0f)
+        refresh()
+        try {
+            engine?.stop()
+            capture?.join()
+            engine = null
+            capture = null
+            val current = requireNotNull(graph.repository.get(id))
+            val failed = graph.repository.append(id, current.version, "$id:discard", RecordingEvent.Failed("已放弃"), System.currentTimeMillis())
+            // Persist the tombstone before cleanup; recovery retries any files left behind.
+            withContext(Dispatchers.IO) {
+                RecordingDeletion(graph.repository, graph.audioDirectory).delete(failed, System.currentTimeMillis())
+            }
+            graph.session.value = SessionState(message = "已删除本次录音")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            graph.session.value = SessionState(phase = SessionPhase.ERROR, message = "删除未完成：${error.message}。请重新打开应用检查。")
+        } finally {
+            shutdown()
         }
     }
 
@@ -275,37 +275,20 @@ class RecordingService : Service() {
         if (!graph.session.value.active) return
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION, notification())
-        val state = graph.session.value
-        if (AtomicIsland.supportedDevice() && state.phase in setOf(SessionPhase.RECORDING, SessionPhase.PAUSED)) {
-            runCatching {
-                val nextRevision = islandRevision + 1
-                val card = NotificationCompat.Builder(this, CHANNEL)
-                    .setSmallIcon(R.drawable.ic_mic).setContentTitle("随声记")
-                    .setContentText(formatDuration(state.durationMs)).setContentIntent(openPending())
-                    .setOnlyAlertOnce(true).setSilent(true).setOngoing(true)
-                    .addExtras(AtomicIsland.extras(this, formatDuration(state.durationMs), state.phase == SessionPhase.PAUSED, nextRevision, openPending()))
-                    .build()
-                // Official create/update sample uses the same untagged notification ID.
-                manager.notify(AtomicIsland.ID, card)
-                islandRevision = nextRevision
-                NotificationDiagnostics.record(this, "post", "notify 已返回（显示待真机确认）")
-            }.onFailure { error ->
-                NotificationDiagnostics.record(this, "post", "发送失败：${error.javaClass.simpleName}")
-            }
-        }
         RecordingWidget.updateAll(this, graph.session.value)
     }
 
     private fun notification(): Notification {
         val state = graph.session.value
         val duration = formatDuration(state.durationMs)
-        val onIsland = state.phase == SessionPhase.RECORDING || state.phase == SessionPhase.PAUSED
+        val canControl = state.phase == SessionPhase.RECORDING || state.phase == SessionPhase.PAUSED
         val builder = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_mic)
             .setContentTitle(
-                "随声记 · ${when (state.phase) {
+                "知伴 · ${when (state.phase) {
                     SessionPhase.PAUSED -> "已暂停"
                     SessionPhase.SAVING -> "正在保存"
+                    SessionPhase.DISCARDING -> "正在删除"
                     SessionPhase.RECORDING -> "正在录音"
                     else -> "正在准备"
                 }}"
@@ -313,15 +296,13 @@ class RecordingService : Service() {
             .setContentText(duration)
             .setContentIntent(openPending())
             .setWhen(System.currentTimeMillis() - state.durationMs)
-            .setUsesChronometer(onIsland && state.phase == SessionPhase.RECORDING)
-            .setRequestPromotedOngoing(onIsland)
-            .setShortCriticalText(if (state.phase == SessionPhase.PAUSED) duration else null)
+            .setUsesChronometer(state.phase == SessionPhase.RECORDING)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setCategory(Notification.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-        if (onIsland) {
+        if (canControl) {
             builder.addAction(0, if (state.phase == SessionPhase.PAUSED) "继续" else "暂停", commandPending(this, if (state.phase == SessionPhase.PAUSED) RESUME else PAUSE, 22))
                 .addAction(0, "停止保存", commandPending(this, STOP, 21))
         }
@@ -329,7 +310,6 @@ class RecordingService : Service() {
     }
 
     private fun shutdown() {
-        endIsland()
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         RecordingWidget.updateAll(this, graph.session.value)
         stopSelf()
@@ -338,7 +318,6 @@ class RecordingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        endIsland()
         engine?.stop()
         scope.cancel()
         wakeLock?.let { if (it.isHeld) it.release() }
@@ -351,20 +330,6 @@ class RecordingService : Service() {
     }
 
     private fun openPending() = PendingIntent.getActivity(this, 24, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-
-    private fun endIsland() {
-        if (islandRevision == 0) return
-        runCatching {
-            val manager = getSystemService(NotificationManager::class.java)
-            // Official cancel path; also remove the untagged record and previous-version card.
-            manager.cancel(AtomicIsland.TAG, AtomicIsland.ID)
-            manager.cancel(AtomicIsland.ID)
-            NotificationDiagnostics.record(this, "end", "取消请求已返回")
-        }.onFailure { error ->
-            NotificationDiagnostics.record(this, "end", "取消失败：${error.javaClass.simpleName}")
-        }
-        islandRevision = 0
-    }
 
     companion object {
         const val START = "dev.local.record.START"

@@ -27,12 +27,12 @@ dependencies {
 tasks.register<JavaExec>("ktlint") {
     classpath = ktlintCli
     mainClass.set("com.pinterest.ktlint.Main")
-    args("app/src/**/*.kt", "*.gradle.kts", "app/*.gradle.kts")
+    args("app/src/**/*.kt", "*.gradle.kts", "app/*.gradle.kts", "!**/superx_demo/**")
 }
 tasks.register<JavaExec>("ktlintFormat") {
     classpath = ktlintCli
     mainClass.set("com.pinterest.ktlint.Main")
-    args("--format", "app/src/**/*.kt", "*.gradle.kts", "app/*.gradle.kts")
+    args("--format", "app/src/**/*.kt", "*.gradle.kts", "app/*.gradle.kts", "!**/superx_demo/**")
 }
 tasks.register<JavaExec>("detekt") {
     classpath = detektCli

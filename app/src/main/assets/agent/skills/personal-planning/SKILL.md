@@ -1,7 +1,7 @@
 ---
 name: personal-planning
 description: 将目标拆成可执行的下一步。用户要求行动规划、安排重点或制定个人计划时使用。
-compatibility: 随声记原生本机查询工具，不依赖脚本或网络搜索。
+compatibility: 知伴原生本机查询工具，不依赖脚本或网络搜索。
 metadata:
   author: record-project
   version: "1.0.0"

@@ -83,6 +83,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onPause = { send(RecordingService.PAUSE) },
                     onStop = { send(RecordingService.STOP) },
+                    onDiscard = { send(RecordingService.DISCARD) },
                     onPlay = model::play, onSeek = model::seek,
                     onNotifications = ::requestNotifications,
                     settingsState = settingsState,

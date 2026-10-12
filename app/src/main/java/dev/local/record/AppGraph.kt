@@ -14,6 +14,7 @@ import dev.local.record.ai.MemoryPlanningScheduler
 import dev.local.record.ai.PersonalAssistant
 import dev.local.record.audio.RecordingRecovery
 import dev.local.record.audio.SessionState
+import dev.local.record.audio.clearLegacyRecordingNotifications
 import dev.local.record.data.ConversationRepository
 import dev.local.record.data.MIGRATION_1_2
 import dev.local.record.data.MIGRATION_2_3
@@ -36,6 +37,11 @@ import kotlinx.coroutines.flow.MutableStateFlow
 @HiltAndroidApp
 class RecordApplication : Application() {
     @Inject lateinit var graph: AppGraph
+
+    override fun onCreate() {
+        super.onCreate()
+        clearLegacyRecordingNotifications(this)
+    }
 }
 
 /** Process-scoped dependencies and live session; recovery never opens the microphone. */

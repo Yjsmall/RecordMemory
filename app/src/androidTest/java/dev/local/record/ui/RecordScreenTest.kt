@@ -78,6 +78,21 @@ class RecordScreenTest {
     }
 
     @Test
+    fun historicalDetailDoesNotOfferDeletionOfAnotherLiveRecording() {
+        compose.setContent {
+            DeviceConfigurationOverride(DeviceConfigurationOverride.ForcedSize(DpSize(400.dp, 800.dp))) {
+                RecordTheme {
+                    RecordScreen(listOf(sample), SessionState(SessionPhase.RECORDING, "live"), PlaybackState(), true, null, true, {}, {}, {}, {}, {}, {})
+                }
+            }
+        }
+        compose.onNodeWithTag("recording-list").performScrollToNode(hasTestTag("recording-sample"))
+        compose.onNodeWithTag("recording-sample").performClick()
+        compose.onNodeWithTag("recording-detail").assertExists()
+        compose.onNodeWithTag("discard-recording").assertDoesNotExist()
+    }
+
+    @Test
     fun navigationRestoresWithoutStartingRecording() {
         var starts = 0
         val restoration = StateRestorationTester(compose)

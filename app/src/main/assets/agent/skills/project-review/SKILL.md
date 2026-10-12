@@ -1,7 +1,7 @@
 ---
 name: project-review
 description: 梳理项目目标、进度与阻碍。用户要求项目复盘、状态梳理或核对下一步时使用。
-compatibility: 随声记原生本机查询工具，不依赖脚本或网络搜索。
+compatibility: 知伴原生本机查询工具，不依赖脚本或网络搜索。
 metadata:
   author: record-project
   version: "1.0.0"

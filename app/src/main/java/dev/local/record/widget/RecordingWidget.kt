@@ -55,8 +55,9 @@ class RecordingWidget : AppWidgetProvider() {
                 SessionPhase.PAUSED -> "已暂停"
                 SessionPhase.STARTING -> "正在启动"
                 SessionPhase.SAVING -> "正在保存"
+                SessionPhase.DISCARDING -> "正在删除"
                 SessionPhase.ERROR -> "录音出错"
-                SessionPhase.IDLE -> "随声记"
+                SessionPhase.IDLE -> "知伴"
             }
             val label = if (state.active) "停止录音" else "开始录音"
             ids.forEach { id ->

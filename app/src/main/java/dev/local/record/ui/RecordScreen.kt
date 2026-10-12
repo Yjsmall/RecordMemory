@@ -56,6 +56,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -66,6 +68,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import dev.local.record.R
 import dev.local.record.audio.SessionPhase
 import dev.local.record.audio.SessionState
 import dev.local.record.audio.formatDuration
@@ -138,7 +141,8 @@ fun RecordScreen(
     onDisableMemory: (String) -> Unit = {},
     onCorrectMemory: (String, String) -> Unit = { _, _ -> },
     onMergeMemory: (String, String) -> Unit = { _, _ -> },
-    assistantModel: AssistantViewModel? = null
+    assistantModel: AssistantViewModel? = null,
+    onDiscard: () -> Unit = {}
 ) {
     val backStack = rememberNavBackStack(Library)
     var deleteId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -192,6 +196,7 @@ fun RecordScreen(
                             onStart, onPause, onStop, onNotifications,
                             selectedId = backStack.filterIsInstance<Detail>().lastOrNull()?.id,
                             onDelete = { deleteId = it.id },
+                            onDiscard = onDiscard,
                             onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
                             onMemories = { backStack.add(MemoriesPage) },
                             onAssistant = { backStack.add(AssistantPage()) },
@@ -215,6 +220,10 @@ fun RecordScreen(
                             onPlay = onPlay,
                             onSeek = onSeek,
                             onStop = onStop,
+                            onDiscard = {
+                                onDiscard()
+                                while (backStack.size > 1) backStack.removeLastOrNull()
+                            },
                             onSettings = settingsModel?.let { { backStack.add(SettingsPage) } },
                             onTranscribe = onTranscribe,
                             onGenerate = onGenerate,
@@ -370,6 +379,7 @@ private fun LibraryPane(
     onNotifications: () -> Unit,
     selectedId: String?,
     onDelete: (Recording) -> Unit,
+    onDiscard: () -> Unit,
     onSettings: (() -> Unit)?,
     onMemories: () -> Unit,
     onAssistant: () -> Unit,
@@ -385,7 +395,11 @@ private fun LibraryPane(
     ) {
         item {
             Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 18.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("随声记", style = MaterialTheme.typography.headlineLarge, modifier = Modifier.weight(1f))
+                Icon(painterResource(R.drawable.ic_brand_mark), null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.primary)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(stringResource(R.string.app_name), style = MaterialTheme.typography.headlineLarge)
+                    Text(stringResource(R.string.brand_tagline), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceContainerLowest) {
                     IconButton(onClick = onMemories, modifier = Modifier.testTag("open-memories")) { Icon(RecordIcons.Memory, "记忆") }
                 }
@@ -396,7 +410,7 @@ private fun LibraryPane(
                 }
             }
         }
-        item { RecordingControls(session, ready, onStart, onPause, onStop) }
+        item { RecordingControls(session, ready, onStart, onPause, onStop, onDiscard) }
         item {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val entries: @Composable () -> Unit = {
@@ -453,7 +467,7 @@ private fun LibraryPane(
 }
 
 @Composable
-fun RecordingControls(session: SessionState, ready: Boolean, onStart: () -> Unit, onPause: () -> Unit, onStop: () -> Unit) {
+fun RecordingControls(session: SessionState, ready: Boolean, onStart: () -> Unit, onPause: () -> Unit, onStop: () -> Unit, onDiscard: () -> Unit = {}) {
     Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest)) {
         Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -474,11 +488,12 @@ fun RecordingControls(session: SessionState, ready: Boolean, onStart: () -> Unit
                         Text(if (session.phase == SessionPhase.PAUSED) "继续录音" else "暂停录音")
                     }
                 }
-                Button(onClick = onStop, enabled = session.phase != SessionPhase.SAVING, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                Button(onClick = onStop, enabled = session.phase !in setOf(SessionPhase.SAVING, SessionPhase.DISCARDING), modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
                     Icon(RecordIcons.Stop, null, Modifier.size(20.dp))
                     Spacer(Modifier.size(8.dp))
                     Text("停止并保存")
                 }
+                DiscardRecordingButton(session, onDiscard)
             } else {
                 session.message?.let { Text(it, color = if (session.phase == SessionPhase.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) }
                 Text("本机保存", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -488,6 +503,17 @@ fun RecordingControls(session: SessionState, ready: Boolean, onStart: () -> Unit
                     Text("开始录音")
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun DiscardRecordingButton(session: SessionState, onDiscard: () -> Unit) {
+    if (session.phase == SessionPhase.RECORDING || session.phase == SessionPhase.PAUSED) {
+        TextButton(onClick = onDiscard, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("discard-recording")) {
+            Icon(RecordIcons.Delete, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.size(8.dp))
+            Text("删除本次录音", color = MaterialTheme.colorScheme.error)
         }
     }
 }
@@ -517,6 +543,7 @@ private fun DetailPane(
     onPlay: (Recording) -> Unit,
     onSeek: (Long) -> Unit,
     onStop: () -> Unit,
+    onDiscard: () -> Unit,
     onSettings: (() -> Unit)?,
     onTranscribe: (String) -> Unit,
     onGenerate: (String, AiCapability) -> Unit,
@@ -549,7 +576,8 @@ private fun DetailPane(
         recording.problem?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         if (session.active) {
             Text("录音中，保存后可播放", style = MaterialTheme.typography.bodyMedium)
-            Button(onClick = onStop, enabled = session.phase != SessionPhase.SAVING) { Text("停止并保存") }
+            Button(onClick = onStop, enabled = session.phase !in setOf(SessionPhase.SAVING, SessionPhase.DISCARDING)) { Text("停止并保存") }
+            if (recording.id == session.recordingId) DiscardRecordingButton(session, onDiscard)
         } else if (recording.fileName != null) {
             val thisPlayback = playback.id == recording.id
             val position = if (thisPlayback) playback.positionMs else 0
@@ -619,6 +647,7 @@ internal fun sessionLabel(phase: SessionPhase) = when (phase) {
     SessionPhase.RECORDING -> "正在录音"
     SessionPhase.PAUSED -> "已暂停"
     SessionPhase.SAVING -> "正在保存…"
+    SessionPhase.DISCARDING -> "正在删除…"
     SessionPhase.ERROR -> "需要留意"
 }
 

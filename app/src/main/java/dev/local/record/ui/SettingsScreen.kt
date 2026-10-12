@@ -79,7 +79,6 @@ private val LocalSettingsEnabled = staticCompositionLocalOf { true }
 
 @Composable
 fun SettingsHome(state: SettingsUiState, model: SettingsViewModel, onConnection: (String?) -> Unit, onCapability: (AiCapability) -> Unit) {
-    var showNotifications by rememberSaveable { mutableStateOf(false) }
     val resolver = LocalContext.current.contentResolver
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         uri?.let { model.export(resolver, it) }
@@ -145,14 +144,9 @@ fun SettingsHome(state: SettingsUiState, model: SettingsViewModel, onConnection:
         GroupDivider()
         ToggleRow("动态配色", "跟随系统壁纸", config.dynamicColors) { model.appearance(config.appearance, it) }
     }
-    SectionLabel("录音")
-    SettingsGroup {
-        SettingsRow("录音通知", "原子通知诊断", RecordIcons.Wave, "notification-diagnostics") { showNotifications = true }
-    }
-    if (showNotifications) NotificationDiagnosticsDialog { showNotifications = false }
     SectionLabel("配置迁移")
     SettingsGroup {
-        SettingsRow("导出配置", "不含密钥与录音", RecordIcons.Export, enabled = !state.busy) { export.launch("随声记-AI配置.json") }
+        SettingsRow("导出配置", "不含密钥与录音", RecordIcons.Export, enabled = !state.busy) { export.launch("知伴-AI配置.json") }
         GroupDivider()
         SettingsRow("导入配置", null, RecordIcons.Import, enabled = !state.busy) { import.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }
     }
@@ -397,7 +391,7 @@ fun SettingsFrame(
                             if (session.phase == SessionPhase.RECORDING || session.phase == SessionPhase.PAUSED) {
                                 TextButton(onClick = onPause) { Text(if (session.phase == SessionPhase.PAUSED) "继续" else "暂停") }
                             }
-                            Button(onClick = onStop, enabled = session.phase != SessionPhase.SAVING) { Text("停止并保存") }
+                            Button(onClick = onStop, enabled = session.phase !in setOf(SessionPhase.SAVING, SessionPhase.DISCARDING)) { Text("停止并保存") }
                         }
                     }
                 }
